@@ -2,7 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 	<dict>
-		<key>CFBundleDevelopmentRegion</key>
+	    <key>GIDClientID</key>
+        <string>477555139342-ul09dfb30dd90arskfgu79p44nt0i4fl.apps.googleusercontent.com</string>		<key>CFBundleDevelopmentRegion</key>
 		<string>$(DEVELOPMENT_LANGUAGE)</string>
 		<key>CFBundleDisplayName</key>
 		<string>WitnessBackup</string>
@@ -63,9 +64,9 @@
 			<key>CFBundleURLName</key>
 			<string>org.doodledome.witnessbackup</string>
 			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>org.doodledome.witnessbackup</string>
-			</array>
+            <array>
+            <string>com.googleusercontent.apps.477555139342-ul09dfb30dd90arskfgu79p44nt0i4fl</string>
+            </array>
 		</dict>
 	</array>
 </dict>
