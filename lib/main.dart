@@ -11,6 +11,9 @@ import 'cloud_storage_provider.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Attempt to restore cloud storage authentication on app startup
+  await _restoreCloudStorageAuth();
+
   final cameraStatus = await Permission.camera.request();
   final microphoneStatus = await Permission.microphone.request();
 
@@ -35,6 +38,31 @@ void main() async {
         ),
       ),
     ));
+  }
+}
+
+/// Attempts to restore cloud storage authentication on app startup
+Future<void> _restoreCloudStorageAuth() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final cloudStorageId = prefs.getString('cloud_storage') ?? 'none';
+    
+    if (cloudStorageId != 'none') {
+      print('Restoring cloud storage authentication for: $cloudStorageId');
+      final provider = CloudStorageFactory.create(cloudStorageId);
+      
+      if (provider != null) {
+        // Attempt to restore the authentication session
+        final isAuthenticated = await provider.isAuthenticated();
+        if (isAuthenticated) {
+          print('Successfully restored ${provider.displayName} authentication');
+        } else {
+          print('Could not restore ${provider.displayName} authentication');
+        }
+      }
+    }
+  } catch (e) {
+    print('Error restoring cloud storage authentication: $e');
   }
 }
 
@@ -210,6 +238,64 @@ class _VideoRecorderState extends State<VideoRecorder> {
       }
       
       print("Video saved to $destinationPath");
+      
+      // Upload to configured cloud storage provider
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final cloudStorageId = prefs.getString('cloud_storage') ?? 'none';
+        
+        if (cloudStorageId != 'none') {
+          final provider = CloudStorageFactory.create(cloudStorageId);
+          
+          if (provider != null) {
+            final isAuthenticated = await provider.isAuthenticated();
+            
+            if (isAuthenticated) {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Uploading to ${provider.displayName}...'),
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              }
+              
+              final uploadSuccess = await provider.uploadFile(destinationPath, filename);
+              
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      uploadSuccess 
+                        ? 'Successfully uploaded to ${provider.displayName}'
+                        : 'Failed to upload to ${provider.displayName}'
+                    ),
+                    duration: const Duration(seconds: 3),
+                    backgroundColor: uploadSuccess ? Colors.green : Colors.red,
+                  ),
+                );
+              }
+              
+              print(uploadSuccess 
+                ? "Video uploaded to ${provider.displayName}" 
+                : "Failed to upload video to ${provider.displayName}");
+            } else {
+              print("Cloud storage provider ${provider.displayName} is not authenticated");
+            }
+          }
+        }
+      } catch (uploadError) {
+        print("Error uploading to cloud storage: $uploadError");
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Upload error: $uploadError'),
+              duration: const Duration(seconds: 3),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+      }
     } catch (e) {
       setState(() {
         _isRecording = false;

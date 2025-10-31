@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -132,6 +133,39 @@ class GoogleDriveAuth {
     }
   }
   
+  /// Attempts to silently restore authentication session
+  /// This should be called on app startup to restore previous sessions
+  static Future<bool> attemptSilentSignIn() async {
+    try {
+      print('Attempting silent sign-in to restore Google Drive session...');
+      
+      // Check if already signed in
+      final currentUser = _googleSignIn.currentUser;
+      if (currentUser != null) {
+        print('Already signed in as: ${currentUser.email}');
+        await _saveAuthState(true);
+        return true;
+      }
+      
+      // Attempt silent sign-in
+      final account = await _googleSignIn.signInSilently();
+      
+      if (account != null) {
+        print('Successfully restored session for: ${account.email}');
+        await _saveAuthState(true);
+        return true;
+      } else {
+        print('No previous session to restore');
+        await _saveAuthState(false);
+        return false;
+      }
+    } catch (e) {
+      print('Error during silent sign-in: $e');
+      await _saveAuthState(false);
+      return false;
+    }
+  }
+  
   /// Checks if user is authenticated
   static Future<bool> isAuthenticated() async {
     try {
@@ -150,9 +184,11 @@ class GoogleDriveAuth {
         }
       }
       
-      // If google_sign_in says not authenticated, update our saved state
+      // If google_sign_in says not authenticated but we have saved state,
+      // attempt silent sign-in to restore the session
       if (currentUser == null && savedState) {
-        await _saveAuthState(false);
+        print('User should be authenticated but no current session. Attempting silent sign-in...');
+        return await attemptSilentSignIn();
       }
       
       return currentUser != null;
@@ -204,24 +240,118 @@ class GoogleDriveAuth {
         return false;
       }
       
-      print('Access token available for upload');
+      print('Starting upload of $fileName to Google Drive...');
       
-      // TODO: Implement actual file upload to Google Drive API
-      // This would involve:
-      // 1. Reading the file
-      // 2. Creating metadata JSON
-      // 3. Using multipart/related to upload file + metadata
-      // 4. Making POST request to https://www.googleapis.com/upload/drive/v3/files
-      //    with Authorization: Bearer {accessToken}
+      // Read the file
+      final file = File(filePath);
+      if (!await file.exists()) {
+        print('Error: File does not exist at path: $filePath');
+        return false;
+      }
       
-      print('Upload to Google Drive not yet fully implemented');
-      print('Would upload: $filePath as $fileName');
-      print('Using access token: ${accessToken.substring(0, 20)}...');
+      final fileBytes = await file.readAsBytes();
+      print('File size: ${fileBytes.length} bytes');
       
-      return true;
-    } catch (e) {
+      // Determine MIME type based on file extension
+      final mimeType = _getMimeType(fileName);
+      print('MIME type: $mimeType');
+      
+      // Create metadata for the file
+      final metadata = {
+        'name': fileName,
+        'mimeType': mimeType,
+      };
+      final metadataJson = jsonEncode(metadata);
+      
+      // Create multipart request body
+      // Using multipart/related as per Google Drive API v3 documentation
+      final boundary = 'boundary_${DateTime.now().millisecondsSinceEpoch}';
+      
+      final List<int> body = [];
+      
+      // Part 1: Metadata
+      body.addAll(utf8.encode('--$boundary\r\n'));
+      body.addAll(utf8.encode('Content-Type: application/json; charset=UTF-8\r\n\r\n'));
+      body.addAll(utf8.encode(metadataJson));
+      body.addAll(utf8.encode('\r\n'));
+      
+      // Part 2: File content
+      body.addAll(utf8.encode('--$boundary\r\n'));
+      body.addAll(utf8.encode('Content-Type: $mimeType\r\n\r\n'));
+      body.addAll(fileBytes);
+      body.addAll(utf8.encode('\r\n'));
+      
+      // End boundary
+      body.addAll(utf8.encode('--$boundary--'));
+      
+      // Make the upload request
+      final uploadUrl = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
+      
+      final response = await http.post(
+        Uri.parse(uploadUrl),
+        headers: {
+          'Authorization': 'Bearer $accessToken',
+          'Content-Type': 'multipart/related; boundary=$boundary',
+          'Content-Length': body.length.toString(),
+        },
+        body: body,
+      );
+      
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final responseData = jsonDecode(response.body);
+        final fileId = responseData['id'];
+        print('Successfully uploaded file to Google Drive');
+        print('File ID: $fileId');
+        print('File name: ${responseData['name']}');
+        return true;
+      } else {
+        print('Upload failed with status code: ${response.statusCode}');
+        print('Response: ${response.body}');
+        return false;
+      }
+    } catch (e, stackTrace) {
       print('Error uploading file: $e');
+      print('Stack trace: $stackTrace');
       return false;
+    }
+  }
+  
+  /// Determines MIME type based on file extension
+  static String _getMimeType(String fileName) {
+    final extension = fileName.split('.').last.toLowerCase();
+    
+    switch (extension) {
+      case 'txt':
+        return 'text/plain';
+      case 'pdf':
+        return 'application/pdf';
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'png':
+        return 'image/png';
+      case 'gif':
+        return 'image/gif';
+      case 'mp4':
+        return 'video/mp4';
+      case 'mp3':
+        return 'audio/mpeg';
+      case 'doc':
+        return 'application/msword';
+      case 'docx':
+        return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      case 'xls':
+        return 'application/vnd.ms-excel';
+      case 'xlsx':
+        return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      case 'zip':
+        return 'application/zip';
+      case 'json':
+        return 'application/json';
+      case 'xml':
+        return 'application/xml';
+      default:
+        return 'application/octet-stream';
     }
   }
 }
