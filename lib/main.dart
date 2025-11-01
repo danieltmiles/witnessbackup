@@ -7,9 +7,14 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'cloud_storage_provider.dart';
+import 'webdav.dart' show WebDAVAuth;
+import 'background_upload_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize background upload service (works on both Android and iOS)
+  await BackgroundUploadService.initialize();
 
   // Attempt to restore cloud storage authentication on app startup
   await _restoreCloudStorageAuth();
@@ -98,11 +103,86 @@ class _VideoRecorderState extends State<VideoRecorder> {
   bool _isRecording = false;
   ResolutionPreset _currentResolution = ResolutionPreset.medium;
   late CameraDescription _currentCamera;
+  
+  // Global key for showing snackbars from background tasks
+  final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
   @override
   void initState() {
     super.initState();
     _loadResolution();
+  }
+  
+  /// Uploads a file to cloud storage in the background
+  /// This runs independently and won't block the UI
+  Future<void> _uploadToCloudStorage(String filePath, String fileName) async {
+    try {
+      print('Starting background upload task for: $fileName');
+      
+      final prefs = await SharedPreferences.getInstance();
+      final cloudStorageId = prefs.getString('cloud_storage') ?? 'none';
+      
+      if (cloudStorageId == 'none') {
+        print('No cloud storage configured, skipping upload');
+        return;
+      }
+      
+      final provider = CloudStorageFactory.create(cloudStorageId);
+      
+      if (provider == null) {
+        print('Failed to create provider for: $cloudStorageId');
+        return;
+      }
+      
+      final isAuthenticated = await provider.isAuthenticated();
+      
+      if (!isAuthenticated) {
+        print('Cloud storage provider ${provider.displayName} is not authenticated');
+        _scaffoldMessengerKey.currentState?.showSnackBar(
+          SnackBar(
+            content: Text('${provider.displayName} not authenticated. Upload skipped.'),
+            duration: const Duration(seconds: 3),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+      
+      print('Starting upload to ${provider.displayName}...');
+      _scaffoldMessengerKey.currentState?.showSnackBar(
+        SnackBar(
+          content: Text('Uploading to ${provider.displayName}...'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      
+      final uploadSuccess = await provider.uploadFile(filePath, fileName);
+      
+      print('Upload completed. Success: $uploadSuccess');
+      
+      _scaffoldMessengerKey.currentState?.showSnackBar(
+        SnackBar(
+          content: Text(
+            uploadSuccess 
+              ? 'Successfully uploaded $fileName to ${provider.displayName}'
+              : 'Failed to upload to ${provider.displayName}'
+          ),
+          duration: const Duration(seconds: 3),
+          backgroundColor: uploadSuccess ? Colors.green : Colors.red,
+        ),
+      );
+    } catch (e, stackTrace) {
+      print('Error in background upload task: $e');
+      print('Stack trace: $stackTrace');
+      
+      _scaffoldMessengerKey.currentState?.showSnackBar(
+        SnackBar(
+          content: Text('Upload error: $e'),
+          duration: const Duration(seconds: 3),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   Future<void> _loadResolution() async {
@@ -228,73 +308,39 @@ class _VideoRecorderState extends State<VideoRecorder> {
       // Clean up the temporary file
       await originalFile.delete();
       
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Video saved as $filename to ${Platform.isAndroid ? 'Movies' : 'Documents'}'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
-      
       print("Video saved to $destinationPath");
       
-      // Upload to configured cloud storage provider
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        final cloudStorageId = prefs.getString('cloud_storage') ?? 'none';
+      // Show snackbar using the global key
+      _scaffoldMessengerKey.currentState?.showSnackBar(
+        SnackBar(
+          content: Text('Video saved as $filename to ${Platform.isAndroid ? 'Movies' : 'Documents'}'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      
+      // Schedule background upload using the persistent background service
+      final prefs = await SharedPreferences.getInstance();
+      final cloudStorageId = prefs.getString('cloud_storage') ?? 'none';
+      
+      if (cloudStorageId != 'none') {
+        // Generate unique task ID
+        final taskId = 'upload_${DateTime.now().millisecondsSinceEpoch}';
         
-        if (cloudStorageId != 'none') {
-          final provider = CloudStorageFactory.create(cloudStorageId);
-          
-          if (provider != null) {
-            final isAuthenticated = await provider.isAuthenticated();
-            
-            if (isAuthenticated) {
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Uploading to ${provider.displayName}...'),
-                    duration: const Duration(seconds: 2),
-                  ),
-                );
-              }
-              
-              final uploadSuccess = await provider.uploadFile(destinationPath, filename);
-              
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      uploadSuccess 
-                        ? 'Successfully uploaded to ${provider.displayName}'
-                        : 'Failed to upload to ${provider.displayName}'
-                    ),
-                    duration: const Duration(seconds: 3),
-                    backgroundColor: uploadSuccess ? Colors.green : Colors.red,
-                  ),
-                );
-              }
-              
-              print(uploadSuccess 
-                ? "Video uploaded to ${provider.displayName}" 
-                : "Failed to upload video to ${provider.displayName}");
-            } else {
-              print("Cloud storage provider ${provider.displayName} is not authenticated");
-            }
-          }
-        }
-      } catch (uploadError) {
-        print("Error uploading to cloud storage: $uploadError");
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Upload error: $uploadError'),
-              duration: const Duration(seconds: 3),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
+        // Schedule the upload (persists across app restarts)
+        await BackgroundUploadService.scheduleUpload(
+          taskId: taskId,
+          filePath: destinationPath,
+          fileName: filename,
+          cloudStorageId: cloudStorageId,
+        );
+        
+        _scaffoldMessengerKey.currentState?.showSnackBar(
+          const SnackBar(
+            content: Text('Upload scheduled - will continue even if app is closed'),
+            duration: Duration(seconds: 3),
+            backgroundColor: Colors.blue,
+          ),
+        );
       }
     } catch (e) {
       setState(() {
@@ -317,8 +363,10 @@ class _VideoRecorderState extends State<VideoRecorder> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
+    return ScaffoldMessenger(
+      key: _scaffoldMessengerKey,
+      child: Scaffold(
+        appBar: AppBar(
         title: const Text('Video Recorder'),
         actions: [
           InkWell(
@@ -459,6 +507,7 @@ class _VideoRecorderState extends State<VideoRecorder> {
         },
         child: Icon(_isRecording ? Icons.stop : Icons.videocam),
       ),
+      ),
     );
   }
 }
@@ -481,12 +530,27 @@ class _SettingsPageState extends State<SettingsPage> {
   late ResolutionPreset _selectedResolution;
   String _selectedCloudStorage = 'none';
   bool _isGoogleDriveAuthenticated = false;
+  bool _isWebDAVAuthenticated = false;
+  
+  // WebDAV configuration controllers
+  final TextEditingController _webdavUriController = TextEditingController();
+  final TextEditingController _webdavUsernameController = TextEditingController();
+  final TextEditingController _webdavPasswordController = TextEditingController();
+  bool _webdavPasswordVisible = false;
 
   @override
   void initState() {
     super.initState();
     _selectedResolution = widget.currentResolution;
     _loadCloudStorage();
+  }
+
+  @override
+  void dispose() {
+    _webdavUriController.dispose();
+    _webdavUsernameController.dispose();
+    _webdavPasswordController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadCloudStorage() async {
@@ -502,9 +566,18 @@ class _SettingsPageState extends State<SettingsPage> {
       }
     }
     
+    // Load WebDAV configuration if it's the selected provider
+    if (cloudStorage == 'webdav') {
+      final config = await WebDAVAuth.getConfiguration();
+      _webdavUriController.text = config['baseUri'] ?? '';
+      _webdavUsernameController.text = config['username'] ?? '';
+      _webdavPasswordController.text = config['password'] ?? '';
+    }
+    
     setState(() {
       _selectedCloudStorage = cloudStorage;
-      _isGoogleDriveAuthenticated = isAuthenticated;
+      _isGoogleDriveAuthenticated = cloudStorage == 'google_drive' && isAuthenticated;
+      _isWebDAVAuthenticated = cloudStorage == 'webdav' && isAuthenticated;
     });
   }
 
@@ -605,7 +678,7 @@ class _SettingsPageState extends State<SettingsPage> {
               if (newValue != null) {
                 if (newValue == 'none') {
                   // Sign out from current provider if authenticated
-                  if (_selectedCloudStorage != '0A0F1CFFnone') {
+                  if (_selectedCloudStorage != 'none') {
                     final currentProvider = CloudStorageFactory.create(_selectedCloudStorage);
                     if (currentProvider != null && await currentProvider.isAuthenticated()) {
                       await currentProvider.signOut();
@@ -616,6 +689,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   setState(() {
                     _selectedCloudStorage = newValue;
                     _isGoogleDriveAuthenticated = false;
+                    _isWebDAVAuthenticated = false;
                   });
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -625,8 +699,24 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                     );
                   }
+                } else if (newValue == 'webdav') {
+                  // For WebDAV, just save the selection and show the configuration UI
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setString('cloud_storage', newValue);
+                  setState(() {
+                    _selectedCloudStorage = newValue;
+                  });
+                  await _loadCloudStorage();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Please configure your WebDAV server settings below'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  }
                 } else {
-                  // Initiate authentication with the selected provider
+                  // For other providers (like Google Drive), initiate authentication
                   final provider = CloudStorageFactory.create(newValue);
                   if (provider != null) {
                     final success = await provider.authenticate(context);
@@ -678,6 +768,157 @@ class _SettingsPageState extends State<SettingsPage> {
                 },
                 icon: const Icon(Icons.refresh),
                 label: const Text('Retry Authorization'),
+              ),
+            ],
+          ],
+          if (_selectedCloudStorage == 'webdav') ...[
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Icon(
+                  _isWebDAVAuthenticated ? Icons.check_circle : Icons.warning,
+                  color: _isWebDAVAuthenticated ? Colors.green : Colors.orange,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _isWebDAVAuthenticated
+                        ? 'WebDAV configured and connected'
+                        : 'Please configure WebDAV settings',
+                    style: TextStyle(
+                      color: _isWebDAVAuthenticated ? Colors.green : Colors.orange,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _webdavUriController,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                labelText: 'WebDAV Server URI',
+                hintText: 'https://example.com/webdav/',
+                prefixIcon: Icon(Icons.cloud),
+              ),
+              keyboardType: TextInputType.url,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _webdavUsernameController,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                labelText: 'Username',
+                prefixIcon: Icon(Icons.person),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _webdavPasswordController,
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                labelText: 'Password',
+                prefixIcon: const Icon(Icons.lock),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _webdavPasswordVisible ? Icons.visibility : Icons.visibility_off,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _webdavPasswordVisible = !_webdavPasswordVisible;
+                    });
+                  },
+                ),
+              ),
+              obscureText: !_webdavPasswordVisible,
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: () async {
+                final uri = _webdavUriController.text.trim();
+                final username = _webdavUsernameController.text.trim();
+                final password = _webdavPasswordController.text;
+                
+                if (uri.isEmpty || username.isEmpty || password.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Please fill in all WebDAV fields'),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                  return;
+                }
+                
+                // Show loading indicator
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (context) => const Center(
+                    child: CircularProgressIndicator(),
+                  ),
+                );
+                
+                // Validate connection
+                final isValid = await WebDAVAuth.validateConnection(uri, username, password);
+                
+                // Dismiss loading indicator
+                if (mounted) Navigator.of(context).pop();
+                
+                if (isValid) {
+                  // Save configuration
+                  await WebDAVAuth.saveConfiguration(uri, username, password);
+                  await _loadCloudStorage();
+                  
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('WebDAV configuration saved successfully'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                } else {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Failed to connect to WebDAV server. Please check your credentials and URI.'),
+                        backgroundColor: Colors.red,
+                        duration: Duration(seconds: 4),
+                      ),
+                    );
+                  }
+                }
+              },
+              icon: const Icon(Icons.save),
+              label: const Text('Save and Test Connection'),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+              ),
+            ),
+            if (_isWebDAVAuthenticated) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  await WebDAVAuth.signOut();
+                  _webdavUriController.clear();
+                  _webdavUsernameController.clear();
+                  _webdavPasswordController.clear();
+                  await _loadCloudStorage();
+                  
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('WebDAV configuration cleared'),
+                      ),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Clear Configuration'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.red,
+                ),
               ),
             ],
           ],

@@ -56,6 +56,12 @@
 		<string>This app needs permission to add videos to your photo library.</string>
 	<key>UIStatusBarHidden</key>
 	<false/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>processing</string>
+		<string>remote-notification</string>
+	</array>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

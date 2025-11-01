@@ -231,7 +231,7 @@ class GoogleDriveAuth {
     await prefs.setBool(_isAuthenticatedKey, isAuthenticated);
   }
   
-  /// Uploads a file to Google Drive
+  /// Uploads a file to Google Drive using resumable upload for large files
   static Future<bool> uploadFile(String filePath, String fileName) async {
     try {
       final accessToken = await getAccessToken();
@@ -249,70 +249,182 @@ class GoogleDriveAuth {
         return false;
       }
       
-      final fileBytes = await file.readAsBytes();
-      print('File size: ${fileBytes.length} bytes');
+      final fileSize = await file.length();
+      print('File size: $fileSize bytes');
       
-      // Determine MIME type based on file extension
-      final mimeType = _getMimeType(fileName);
-      print('MIME type: $mimeType');
+      // Use resumable upload for files larger than 5MB
+      const resumableThreshold = 5 * 1024 * 1024; // 5 MB
       
-      // Create metadata for the file
-      final metadata = {
-        'name': fileName,
-        'mimeType': mimeType,
-      };
-      final metadataJson = jsonEncode(metadata);
-      
-      // Create multipart request body
-      // Using multipart/related as per Google Drive API v3 documentation
-      final boundary = 'boundary_${DateTime.now().millisecondsSinceEpoch}';
-      
-      final List<int> body = [];
-      
-      // Part 1: Metadata
-      body.addAll(utf8.encode('--$boundary\r\n'));
-      body.addAll(utf8.encode('Content-Type: application/json; charset=UTF-8\r\n\r\n'));
-      body.addAll(utf8.encode(metadataJson));
-      body.addAll(utf8.encode('\r\n'));
-      
-      // Part 2: File content
-      body.addAll(utf8.encode('--$boundary\r\n'));
-      body.addAll(utf8.encode('Content-Type: $mimeType\r\n\r\n'));
-      body.addAll(fileBytes);
-      body.addAll(utf8.encode('\r\n'));
-      
-      // End boundary
-      body.addAll(utf8.encode('--$boundary--'));
-      
-      // Make the upload request
-      final uploadUrl = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
-      
-      final response = await http.post(
-        Uri.parse(uploadUrl),
-        headers: {
-          'Authorization': 'Bearer $accessToken',
-          'Content-Type': 'multipart/related; boundary=$boundary',
-          'Content-Length': body.length.toString(),
-        },
-        body: body,
-      );
-      
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        final responseData = jsonDecode(response.body);
-        final fileId = responseData['id'];
-        print('Successfully uploaded file to Google Drive');
-        print('File ID: $fileId');
-        print('File name: ${responseData['name']}');
-        return true;
+      if (fileSize <= resumableThreshold) {
+        // For small files, use simple multipart upload
+        return await _uploadSimple(file, fileName, accessToken);
       } else {
-        print('Upload failed with status code: ${response.statusCode}');
-        print('Response: ${response.body}');
-        return false;
+        // For large files, use resumable upload
+        return await _uploadResumable(file, fileName, accessToken, fileSize);
       }
     } catch (e, stackTrace) {
       print('Error uploading file: $e');
       print('Stack trace: $stackTrace');
       return false;
+    }
+  }
+  
+  /// Simple multipart upload for small files
+  static Future<bool> _uploadSimple(File file, String fileName, String accessToken) async {
+    final fileBytes = await file.readAsBytes();
+    final mimeType = _getMimeType(fileName);
+    print('MIME type: $mimeType');
+    
+    // Create metadata for the file
+    final metadata = {
+      'name': fileName,
+      'mimeType': mimeType,
+    };
+    final metadataJson = jsonEncode(metadata);
+    
+    // Create multipart request body
+    final boundary = 'boundary_${DateTime.now().millisecondsSinceEpoch}';
+    
+    final List<int> body = [];
+    
+    // Part 1: Metadata
+    body.addAll(utf8.encode('--$boundary\r\n'));
+    body.addAll(utf8.encode('Content-Type: application/json; charset=UTF-8\r\n\r\n'));
+    body.addAll(utf8.encode(metadataJson));
+    body.addAll(utf8.encode('\r\n'));
+    
+    // Part 2: File content
+    body.addAll(utf8.encode('--$boundary\r\n'));
+    body.addAll(utf8.encode('Content-Type: $mimeType\r\n\r\n'));
+    body.addAll(fileBytes);
+    body.addAll(utf8.encode('\r\n'));
+    
+    // End boundary
+    body.addAll(utf8.encode('--$boundary--'));
+    
+    // Make the upload request
+    print('Uploading file (simple mode)...');
+    final uploadUrl = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
+    
+    final response = await http.post(
+      Uri.parse(uploadUrl),
+      headers: {
+        'Authorization': 'Bearer $accessToken',
+        'Content-Type': 'multipart/related; boundary=$boundary',
+        'Content-Length': body.length.toString(),
+      },
+      body: body,
+    );
+    
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      final responseData = jsonDecode(response.body);
+      final fileId = responseData['id'];
+      print('Successfully uploaded file to Google Drive');
+      print('File ID: $fileId');
+      return true;
+    } else {
+      print('Upload failed with status code: ${response.statusCode}');
+      print('Response: ${response.body}');
+      return false;
+    }
+  }
+  
+  /// Resumable upload for large files
+  static Future<bool> _uploadResumable(File file, String fileName, String accessToken, int fileSize) async {
+    final mimeType = _getMimeType(fileName);
+    print('MIME type: $mimeType');
+    print('Using resumable upload');
+    
+    // Step 1: Initiate resumable upload session
+    final metadata = {
+      'name': fileName,
+      'mimeType': mimeType,
+    };
+    final metadataJson = jsonEncode(metadata);
+    
+    print('Initiating resumable upload session...');
+    final initResponse = await http.post(
+      Uri.parse('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable'),
+      headers: {
+        'Authorization': 'Bearer $accessToken',
+        'Content-Type': 'application/json; charset=UTF-8',
+        'X-Upload-Content-Type': mimeType,
+        'X-Upload-Content-Length': fileSize.toString(),
+      },
+      body: metadataJson,
+    );
+    
+    if (initResponse.statusCode != 200) {
+      print('Failed to initiate resumable upload: ${initResponse.statusCode}');
+      print('Response: ${initResponse.body}');
+      return false;
+    }
+    
+    final uploadUri = initResponse.headers['location'];
+    if (uploadUri == null) {
+      print('No upload URI returned in Location header');
+      return false;
+    }
+    
+    print('Resumable upload session created: $uploadUri');
+    
+    // Step 2: Upload file in chunks
+    const chunkSize = 5 * 1024 * 1024; // 5 MB chunks (multiple of 256 KB as required by Google)
+    final randomAccessFile = await file.open(mode: FileMode.read);
+    
+    try {
+      int uploadedBytes = 0;
+      int chunkNumber = 0;
+      
+      while (uploadedBytes < fileSize) {
+        chunkNumber++;
+        final remainingBytes = fileSize - uploadedBytes;
+        final currentChunkSize = remainingBytes < chunkSize ? remainingBytes : chunkSize;
+        
+        // Read chunk
+        final chunk = await randomAccessFile.read(currentChunkSize);
+        
+        // Calculate range
+        final rangeStart = uploadedBytes;
+        final rangeEnd = uploadedBytes + chunk.length - 1;
+        
+        print('Uploading chunk $chunkNumber: bytes $rangeStart-$rangeEnd/$fileSize (${(rangeEnd + 1) * 100 ~/ fileSize}%)');
+        
+        // Upload chunk
+        final chunkResponse = await http.put(
+          Uri.parse(uploadUri),
+          headers: {
+            'Content-Length': chunk.length.toString(),
+            'Content-Range': 'bytes $rangeStart-$rangeEnd/${fileSize}',
+          },
+          body: chunk,
+        );
+        
+        print('Chunk $chunkNumber response status: ${chunkResponse.statusCode}');
+        
+        // Check response
+        // 308 Resume Incomplete - continue uploading
+        // 200 or 201 - upload complete
+        if (chunkResponse.statusCode == 308) {
+          // Continue uploading
+          uploadedBytes += chunk.length;
+        } else if (chunkResponse.statusCode == 200 || chunkResponse.statusCode == 201) {
+          // Upload complete
+          final responseData = jsonDecode(chunkResponse.body);
+          final fileId = responseData['id'];
+          print('Successfully uploaded file to Google Drive');
+          print('File ID: $fileId');
+          return true;
+        } else {
+          print('Chunk upload failed with status code: ${chunkResponse.statusCode}');
+          print('Response: ${chunkResponse.body}');
+          return false;
+        }
+      }
+      
+      return true;
+    } finally {
+      await randomAccessFile.close();
     }
   }
   

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'google_drive.dart' show GoogleDriveProvider;
+import 'webdav.dart' show WebDAVProvider;
 
 /// Abstract interface for cloud storage providers
 /// Each provider (Google Drive, Dropbox, OneDrive, etc.) implements this interface
@@ -38,6 +39,8 @@ class CloudStorageFactory {
       case 'google_drive':
         // This will import your google_drive.dart which can use google_sign_in internally
         return GoogleDriveProvider();
+      case 'webdav':
+        return WebDAVProvider();
       // Future providers:
       // case 'dropbox':
       //   return DropboxProvider();
@@ -52,6 +55,7 @@ class CloudStorageFactory {
     return [
       {'id': 'none', 'name': 'None'},
       {'id': 'google_drive', 'name': 'Google Drive'},
+      {'id': 'webdav', 'name': 'WebDAV'},
       // Future providers:
       // {'id': 'dropbox', 'name': 'Dropbox'},
       // {'id': 'onedrive', 'name': 'OneDrive'},
