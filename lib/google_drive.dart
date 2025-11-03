@@ -26,8 +26,21 @@ class GoogleDriveProvider implements CloudStorageProvider {
   Future<void> signOut() => GoogleDriveAuth.signOut();
   
   @override
-  Future<bool> uploadFile(String filePath, String fileName) => 
-      GoogleDriveAuth.uploadFile(filePath, fileName);
+  Future<bool> uploadFile(
+    String filePath, 
+    String fileName, {
+    String? taskId,
+    String? existingSessionUri,
+    int? startByte,
+    Function(int uploaded, int total, String? sessionUri)? onProgress,
+  }) => GoogleDriveAuth.uploadFile(
+    filePath, 
+    fileName,
+    taskId: taskId,
+    existingSessionUri: existingSessionUri,
+    startByte: startByte,
+    onProgress: onProgress,
+  );
 }
 
 /// Internal implementation class for Google Drive OAuth using google_sign_in
@@ -232,7 +245,14 @@ class GoogleDriveAuth {
   }
   
   /// Uploads a file to Google Drive using resumable upload for large files
-  static Future<bool> uploadFile(String filePath, String fileName) async {
+  static Future<bool> uploadFile(
+    String filePath, 
+    String fileName, {
+    String? taskId,
+    String? existingSessionUri,
+    int? startByte,
+    Function(int uploaded, int total, String? sessionUri)? onProgress,
+  }) async {
     try {
       final accessToken = await getAccessToken();
       if (accessToken == null) {
@@ -257,10 +277,18 @@ class GoogleDriveAuth {
       
       if (fileSize <= resumableThreshold) {
         // For small files, use simple multipart upload
-        return await _uploadSimple(file, fileName, accessToken);
+        return await _uploadSimple(file, fileName, accessToken, onProgress: onProgress);
       } else {
-        // For large files, use resumable upload
-        return await _uploadResumable(file, fileName, accessToken, fileSize);
+        // For large files, use resumable upload with progress tracking
+        return await _uploadResumable(
+          file, 
+          fileName, 
+          accessToken, 
+          fileSize,
+          existingSessionUri: existingSessionUri,
+          startByte: startByte ?? 0,
+          onProgress: onProgress,
+        );
       }
     } catch (e, stackTrace) {
       print('Error uploading file: $e');
@@ -270,7 +298,12 @@ class GoogleDriveAuth {
   }
   
   /// Simple multipart upload for small files
-  static Future<bool> _uploadSimple(File file, String fileName, String accessToken) async {
+  static Future<bool> _uploadSimple(
+    File file, 
+    String fileName, 
+    String accessToken, {
+    Function(int uploaded, int total, String? sessionUri)? onProgress,
+  }) async {
     final fileBytes = await file.readAsBytes();
     final mimeType = _getMimeType(fileName);
     print('MIME type: $mimeType');
@@ -330,51 +363,79 @@ class GoogleDriveAuth {
   }
   
   /// Resumable upload for large files
-  static Future<bool> _uploadResumable(File file, String fileName, String accessToken, int fileSize) async {
+  static Future<bool> _uploadResumable(
+    File file, 
+    String fileName, 
+    String accessToken, 
+    int fileSize, {
+    String? existingSessionUri,
+    int startByte = 0,
+    Function(int uploaded, int total, String? sessionUri)? onProgress,
+  }) async {
     final mimeType = _getMimeType(fileName);
     print('MIME type: $mimeType');
     print('Using resumable upload');
     
-    // Step 1: Initiate resumable upload session
-    final metadata = {
-      'name': fileName,
-      'mimeType': mimeType,
-    };
-    final metadataJson = jsonEncode(metadata);
+    String uploadUri;
     
-    print('Initiating resumable upload session...');
-    final initResponse = await http.post(
-      Uri.parse('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable'),
-      headers: {
-        'Authorization': 'Bearer $accessToken',
-        'Content-Type': 'application/json; charset=UTF-8',
-        'X-Upload-Content-Type': mimeType,
-        'X-Upload-Content-Length': fileSize.toString(),
-      },
-      body: metadataJson,
-    );
-    
-    if (initResponse.statusCode != 200) {
-      print('Failed to initiate resumable upload: ${initResponse.statusCode}');
-      print('Response: ${initResponse.body}');
-      return false;
+    // Step 1: Get or create resumable upload session
+    if (existingSessionUri != null && existingSessionUri.isNotEmpty) {
+      // Resume existing session
+      print('Resuming upload from existing session: $existingSessionUri');
+      print('Starting from byte: $startByte');
+      uploadUri = existingSessionUri;
+    } else {
+      // Initiate new resumable upload session
+      final metadata = {
+        'name': fileName,
+        'mimeType': mimeType,
+      };
+      final metadataJson = jsonEncode(metadata);
+      
+      print('Initiating new resumable upload session...');
+      final initResponse = await http.post(
+        Uri.parse('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable'),
+        headers: {
+          'Authorization': 'Bearer $accessToken',
+          'Content-Type': 'application/json; charset=UTF-8',
+          'X-Upload-Content-Type': mimeType,
+          'X-Upload-Content-Length': fileSize.toString(),
+        },
+        body: metadataJson,
+      );
+      
+      if (initResponse.statusCode != 200) {
+        print('Failed to initiate resumable upload: ${initResponse.statusCode}');
+        print('Response: ${initResponse.body}');
+        return false;
+      }
+      
+      uploadUri = initResponse.headers['location'] ?? '';
+      if (uploadUri.isEmpty) {
+        print('No upload URI returned in Location header');
+        return false;
+      }
+      
+      print('Resumable upload session created: $uploadUri');
+      
+      // Call progress callback with session URI
+      if (onProgress != null) {
+        onProgress(0, fileSize, uploadUri);
+      }
     }
-    
-    final uploadUri = initResponse.headers['location'];
-    if (uploadUri == null) {
-      print('No upload URI returned in Location header');
-      return false;
-    }
-    
-    print('Resumable upload session created: $uploadUri');
     
     // Step 2: Upload file in chunks
     const chunkSize = 5 * 1024 * 1024; // 5 MB chunks (multiple of 256 KB as required by Google)
     final randomAccessFile = await file.open(mode: FileMode.read);
     
     try {
-      int uploadedBytes = 0;
-      int chunkNumber = 0;
+      // Seek to start byte if resuming
+      if (startByte > 0) {
+        await randomAccessFile.setPosition(startByte);
+      }
+      
+      int uploadedBytes = startByte;
+      int chunkNumber = startByte ~/ chunkSize;
       
       while (uploadedBytes < fileSize) {
         chunkNumber++;
@@ -408,12 +469,23 @@ class GoogleDriveAuth {
         if (chunkResponse.statusCode == 308) {
           // Continue uploading
           uploadedBytes += chunk.length;
+          
+          // Call progress callback
+          if (onProgress != null) {
+            onProgress(uploadedBytes, fileSize, uploadUri);
+          }
         } else if (chunkResponse.statusCode == 200 || chunkResponse.statusCode == 201) {
           // Upload complete
           final responseData = jsonDecode(chunkResponse.body);
           final fileId = responseData['id'];
           print('Successfully uploaded file to Google Drive');
           print('File ID: $fileId');
+          
+          // Call final progress callback
+          if (onProgress != null) {
+            onProgress(fileSize, fileSize, null);
+          }
+          
           return true;
         } else {
           print('Chunk upload failed with status code: ${chunkResponse.statusCode}');

@@ -46,6 +46,9 @@ class BackgroundUploadService {
         taskId,
         uploadTaskName,
         tag: uploadTaskTag,
+        inputData: {
+          'taskId': taskId,
+        },
         constraints: Constraints(
           networkType: NetworkType.connected,
         ),
@@ -78,6 +81,9 @@ class BackgroundUploadService {
           task.id,
           uploadTaskName,
           tag: uploadTaskTag,
+          inputData: {
+            'taskId': task.id,
+          },
           constraints: Constraints(
             networkType: NetworkType.connected,
           ),
@@ -127,9 +133,28 @@ class BackgroundUploadService {
         throw Exception('Provider not authenticated: ${task.cloudStorageId}');
       }
       
-      // Perform the upload
+      // Perform the upload with progress tracking and resume support
       print('Starting upload to ${provider.displayName}: ${task.fileName}');
-      final success = await provider.uploadFile(task.filePath, task.fileName);
+      if (task.uploadedBytes != null && task.uploadedBytes! > 0) {
+        print('Resuming from byte ${task.uploadedBytes} of ${task.totalBytes}');
+      }
+      
+      final success = await provider.uploadFile(
+        task.filePath, 
+        task.fileName,
+        taskId: taskId,
+        existingSessionUri: task.resumableSessionUri,
+        startByte: task.uploadedBytes,
+        onProgress: (uploaded, total, sessionUri) async {
+          // Save progress to persistent storage
+          await UploadStateManager.updateProgress(
+            taskId, 
+            uploaded, 
+            total,
+            sessionUri: sessionUri,
+          );
+        },
+      );
       
       if (success) {
         print('Upload successful: ${task.fileName}');

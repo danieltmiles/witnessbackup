@@ -24,8 +24,19 @@ abstract class CloudStorageProvider {
   /// Uploads a file to the cloud storage
   /// [filePath] - Local path to the file
   /// [fileName] - Name to give the file in cloud storage
+  /// [taskId] - Optional task ID for tracking progress
+  /// [existingSessionUri] - Optional existing resumable session URI to resume from
+  /// [startByte] - Optional starting byte position for resuming
+  /// [onProgress] - Optional callback for upload progress updates
   /// Returns true if upload was successful
-  Future<bool> uploadFile(String filePath, String fileName);
+  Future<bool> uploadFile(
+    String filePath, 
+    String fileName, {
+    String? taskId,
+    String? existingSessionUri,
+    int? startByte,
+    Function(int uploaded, int total, String? sessionUri)? onProgress,
+  });
   
   /// Optional: Get current upload progress (0.0 to 1.0)
   /// Can be used for progress indicators

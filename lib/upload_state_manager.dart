@@ -13,6 +13,7 @@ class UploadTask {
   String? errorMessage;
   int? uploadedBytes;
   int? totalBytes;
+  String? resumableSessionUri; // For resumable uploads (e.g., Google Drive session URI)
 
   UploadTask({
     required this.id,
@@ -25,6 +26,7 @@ class UploadTask {
     this.errorMessage,
     this.uploadedBytes,
     this.totalBytes,
+    this.resumableSessionUri,
   });
 
   Map<String, dynamic> toJson() {
@@ -39,6 +41,7 @@ class UploadTask {
       'errorMessage': errorMessage,
       'uploadedBytes': uploadedBytes,
       'totalBytes': totalBytes,
+      'resumableSessionUri': resumableSessionUri,
     };
   }
 
@@ -54,6 +57,7 @@ class UploadTask {
       errorMessage: json['errorMessage'],
       uploadedBytes: json['uploadedBytes'],
       totalBytes: json['totalBytes'],
+      resumableSessionUri: json['resumableSessionUri'],
     );
   }
 }
@@ -103,6 +107,22 @@ class UploadStateManager {
       tasks[index] = updatedTask;
       await _saveTasks(tasks);
       print('Updated upload task: ${updatedTask.fileName} - ${updatedTask.status}');
+    }
+  }
+
+  /// Updates progress for a specific task
+  static Future<void> updateProgress(String taskId, int uploadedBytes, int totalBytes, {String? sessionUri}) async {
+    final tasks = await getAllTasks();
+    final index = tasks.indexWhere((task) => task.id == taskId);
+    if (index != -1) {
+      tasks[index].uploadedBytes = uploadedBytes;
+      tasks[index].totalBytes = totalBytes;
+      if (sessionUri != null) {
+        tasks[index].resumableSessionUri = sessionUri;
+      }
+      await _saveTasks(tasks);
+      final percentComplete = (uploadedBytes * 100 / totalBytes).toStringAsFixed(1);
+      print('Upload progress for ${tasks[index].fileName}: $percentComplete% ($uploadedBytes/$totalBytes bytes)');
     }
   }
 

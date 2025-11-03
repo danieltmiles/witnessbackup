@@ -25,8 +25,21 @@ class WebDAVProvider implements CloudStorageProvider {
   Future<void> signOut() => WebDAVAuth.signOut();
   
   @override
-  Future<bool> uploadFile(String filePath, String fileName) => 
-      WebDAVAuth.uploadFile(filePath, fileName);
+  Future<bool> uploadFile(
+    String filePath, 
+    String fileName, {
+    String? taskId,
+    String? existingSessionUri,
+    int? startByte,
+    Function(int uploaded, int total, String? sessionUri)? onProgress,
+  }) => WebDAVAuth.uploadFile(
+    filePath, 
+    fileName,
+    taskId: taskId,
+    existingSessionUri: existingSessionUri,
+    startByte: startByte,
+    onProgress: onProgress,
+  );
 }
 
 /// Internal implementation class for WebDAV operations
@@ -144,7 +157,14 @@ class WebDAVAuth {
   
   /// Uploads a file to the WebDAV server using chunked upload
   /// This prevents connection resets for large files
-  static Future<bool> uploadFile(String filePath, String fileName) async {
+  static Future<bool> uploadFile(
+    String filePath, 
+    String fileName, {
+    String? taskId,
+    String? existingSessionUri,
+    int? startByte,
+    Function(int uploaded, int total, String? sessionUri)? onProgress,
+  }) async {
     try {
       final config = await getConfiguration();
       final baseUri = config['baseUri']!;
