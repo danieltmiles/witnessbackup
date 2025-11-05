@@ -68,11 +68,21 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>org.doodledome.witnessbackup</string>
+			<string>com.google</string>
 			<key>CFBundleURLSchemes</key>
             <array>
             <string>com.googleusercontent.apps.477555139342-ul09dfb30dd90arskfgu79p44nt0i4fl</string>
             </array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>org.doodledome.witnessbackup</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>org.doodledome.witnessbackup</string>
+			</array>
 		</dict>
 	</array>
 </dict>

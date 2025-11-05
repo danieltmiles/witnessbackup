@@ -6,8 +6,10 @@ import 'package:camera/camera.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:app_links/app_links.dart';
 import 'cloud_storage_provider.dart';
 import 'webdav.dart' show WebDAVAuth;
+import 'dropbox.dart' show DropboxAuth;
 import 'background_upload_service.dart';
 
 void main() async {
@@ -71,19 +73,85 @@ Future<void> _restoreCloudStorageAuth() async {
   }
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   final List<CameraDescription> cameras;
 
   const MyApp({super.key, required this.cameras});
 
   @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  late AppLinks _appLinks;
+  StreamSubscription<Uri>? _linkSubscription;
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
+  @override
+  void initState() {
+    super.initState();
+    _initDeepLinkListener();
+  }
+
+  void _initDeepLinkListener() {
+    _appLinks = AppLinks();
+    
+    // Handle links when app is already running
+    _linkSubscription = _appLinks.uriLinkStream.listen((uri) {
+      _handleDeepLink(uri);
+    }, onError: (err) {
+      print('Error listening to deep links: $err');
+    });
+    
+    // Handle the initial link if app was launched from a deep link
+    _handleInitialLink();
+  }
+
+  Future<void> _handleInitialLink() async {
+    try {
+      final uri = await _appLinks.getInitialLink();
+      if (uri != null) {
+        print('App launched with deep link: ${uri.toString()}');
+        _handleDeepLink(uri);
+      } else {
+        print('No initial deep link (app not launched from link)');
+      }
+    } catch (e) {
+      print('Error getting initial link: $e');
+    }
+  }
+
+  void _handleDeepLink(Uri uri) {
+    print('Received deep link: ${uri.toString()}');
+    
+    try {
+      // Check if this is a Dropbox OAuth callback
+      if (uri.scheme == 'org.doodledome.witnessbackup' && uri.host == 'oauth-callback') {
+        final context = _navigatorKey.currentContext;
+        if (context != null) {
+          DropboxAuth.handleOAuthCallback(uri, context);
+        }
+      }
+    } catch (e) {
+      print('Error handling deep link: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _linkSubscription?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       title: 'Video Recorder',
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      home: VideoRecorder(cameras: cameras),
+      home: VideoRecorder(cameras: widget.cameras),
     );
   }
 }
@@ -531,6 +599,7 @@ class _SettingsPageState extends State<SettingsPage> {
   String _selectedCloudStorage = 'none';
   bool _isGoogleDriveAuthenticated = false;
   bool _isWebDAVAuthenticated = false;
+  bool _isDropboxAuthenticated = false;
   
   // WebDAV configuration controllers
   final TextEditingController _webdavUriController = TextEditingController();
@@ -578,6 +647,7 @@ class _SettingsPageState extends State<SettingsPage> {
       _selectedCloudStorage = cloudStorage;
       _isGoogleDriveAuthenticated = cloudStorage == 'google_drive' && isAuthenticated;
       _isWebDAVAuthenticated = cloudStorage == 'webdav' && isAuthenticated;
+      _isDropboxAuthenticated = cloudStorage == 'dropbox' && isAuthenticated;
     });
   }
 
@@ -734,6 +804,43 @@ class _SettingsPageState extends State<SettingsPage> {
               }
             },
           ),
+          if (_selectedCloudStorage == 'dropbox') ...[
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Icon(
+                  _isDropboxAuthenticated ? Icons.check_circle : Icons.warning,
+                  color: _isDropboxAuthenticated ? Colors.green : Colors.orange,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _isDropboxAuthenticated
+                        ? 'Connected to Dropbox'
+                        : 'Not authenticated. Complete authorization in your browser.',
+                    style: TextStyle(
+                      color: _isDropboxAuthenticated ? Colors.green : Colors.orange,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (!_isDropboxAuthenticated) ...[
+              const SizedBox(height: 12),
+              ElevatedButton.icon(
+                onPressed: () async {
+                  final provider = CloudStorageFactory.create(_selectedCloudStorage);
+                  if (provider != null) {
+                    await provider.authenticate(context);
+                    await _loadCloudStorage();
+                  }
+                },
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry Authorization'),
+              ),
+            ],
+          ],
           if (_selectedCloudStorage == 'google_drive') ...[
             const SizedBox(height: 16),
             Row(
