@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_custom_tabs/flutter_custom_tabs.dart' as custom_tabs;
 import 'package:crypto/crypto.dart';
 import 'dart:math';
@@ -48,6 +48,9 @@ class DropboxProvider implements CloudStorageProvider {
 /// Internal implementation class for Dropbox OAuth 2.0 and API
 /// This class is not exposed outside this file
 class DropboxAuth {
+  // Secure storage instance
+  static const _storage = FlutterSecureStorage();
+
   // Dropbox OAuth configuration
   // NOTE: Replace these with your actual Dropbox app credentials
   static const String _appKey = 'wc10ca6zcclali8';
@@ -76,9 +79,8 @@ class DropboxAuth {
       final state = _generateRandomString(32);
       
       // Store PKCE parameters temporarily
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('dropbox_code_verifier', codeVerifier);
-      await prefs.setString('dropbox_state', state);
+      await _storage.write(key: 'dropbox_code_verifier', value: codeVerifier);
+      await _storage.write(key: 'dropbox_state', value: state);
       
       // Build authorization URL
       final authUrl = Uri.parse(_authorizationEndpoint).replace(queryParameters: {
@@ -180,9 +182,8 @@ class DropboxAuth {
       final error = uri.queryParameters['error'];
       
       // Get stored state for validation
-      final prefs = await SharedPreferences.getInstance();
-      final expectedState = prefs.getString('dropbox_state');
-      final codeVerifier = prefs.getString('dropbox_code_verifier');
+      final expectedState = await _storage.read(key: 'dropbox_state');
+      final codeVerifier = await _storage.read(key: 'dropbox_code_verifier');
       
       // Validate state parameter
       if (returnedState != expectedState) {
@@ -239,15 +240,15 @@ class DropboxAuth {
           final refreshToken = tokenData['refresh_token'];
 
           // Store tokens
-          await prefs.setString(_accessTokenKey, accessToken);
+          await _storage.write(key: _accessTokenKey, value: accessToken);
           if (refreshToken != null) {
-            await prefs.setString(_refreshTokenKey, refreshToken);
+            await _storage.write(key: _refreshTokenKey, value: refreshToken);
           }
-          await prefs.setBool(_isAuthenticatedKey, true);
+          await _storage.write(key: _isAuthenticatedKey, value: 'true');
 
           // Clean up temporary PKCE parameters
-          await prefs.remove('dropbox_code_verifier');
-          await prefs.remove('dropbox_state');
+          await _storage.delete(key: 'dropbox_code_verifier');
+          await _storage.delete(key: 'dropbox_state');
 
           print('Successfully authenticated with Dropbox');
 
@@ -290,11 +291,10 @@ class DropboxAuth {
   /// Checks if user is authenticated
   static Future<bool> isAuthenticated() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final isAuthenticated = prefs.getBool(_isAuthenticatedKey) ?? false;
-      final accessToken = prefs.getString(_accessTokenKey);
+      final isAuthenticated = await _storage.read(key: _isAuthenticatedKey);
+      final accessToken = await _storage.read(key: _accessTokenKey);
       
-      return isAuthenticated && accessToken != null && accessToken.isNotEmpty;
+      return isAuthenticated == 'true' && accessToken != null && accessToken.isNotEmpty;
     } catch (e) {
       print('Error checking authentication: $e');
       return false;
@@ -304,8 +304,7 @@ class DropboxAuth {
   /// Gets the current access token, refreshing if necessary
   static Future<String?> getAccessToken() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final accessToken = prefs.getString(_accessTokenKey);
+      final accessToken = await _storage.read(key: _accessTokenKey);
       
       // For simplicity, we'll assume the token is valid
       // In a production app, you should check token expiration and refresh if needed
@@ -319,10 +318,9 @@ class DropboxAuth {
   /// Signs out the user
   static Future<void> signOut() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_accessTokenKey);
-      await prefs.remove(_refreshTokenKey);
-      await prefs.setBool(_isAuthenticatedKey, false);
+      await _storage.delete(key: _accessTokenKey);
+      await _storage.delete(key: _refreshTokenKey);
+      await _storage.write(key: _isAuthenticatedKey, value: 'false');
       print('Signed out from Dropbox');
     } catch (e) {
       print('Error signing out: $e');

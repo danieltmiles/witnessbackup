@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'cloud_storage_provider.dart';
 
@@ -46,6 +46,9 @@ class GoogleDriveProvider implements CloudStorageProvider {
 /// Internal implementation class for Google Drive OAuth using google_sign_in
 /// This class is not exposed outside this file
 class GoogleDriveAuth {
+  // Secure storage instance
+  static const _storage = FlutterSecureStorage();
+
   // GoogleSignIn instance configured for Drive access
   static final GoogleSignIn _googleSignIn = GoogleSignIn(
     scopes: [
@@ -182,8 +185,7 @@ class GoogleDriveAuth {
   /// Checks if user is authenticated
   static Future<bool> isAuthenticated() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final savedState = prefs.getBool(_isAuthenticatedKey) ?? false;
+      final savedState = await _storage.read(key: _isAuthenticatedKey);
       
       // Also verify with google_sign_in
       final currentUser = _googleSignIn.currentUser;
@@ -199,7 +201,7 @@ class GoogleDriveAuth {
       
       // If google_sign_in says not authenticated but we have saved state,
       // attempt silent sign-in to restore the session
-      if (currentUser == null && savedState) {
+      if (currentUser == null && savedState == 'true') {
         print('User should be authenticated but no current session. Attempting silent sign-in...');
         return await attemptSilentSignIn();
       }
@@ -240,8 +242,7 @@ class GoogleDriveAuth {
   
   /// Saves authentication state to SharedPreferences
   static Future<void> _saveAuthState(bool isAuthenticated) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_isAuthenticatedKey, isAuthenticated);
+    await _storage.write(key: _isAuthenticatedKey, value: isAuthenticated.toString());
   }
   
   /// Uploads a file to Google Drive using resumable upload for large files

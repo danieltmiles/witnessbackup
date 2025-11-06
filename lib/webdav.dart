@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'cloud_storage_provider.dart';
 
 /// WebDAV implementation of CloudStorageProvider
@@ -45,6 +45,9 @@ class WebDAVProvider implements CloudStorageProvider {
 /// Internal implementation class for WebDAV operations
 /// This class is not exposed outside this file
 class WebDAVAuth {
+  // Secure storage instance
+  static const _storage = FlutterSecureStorage();
+
   // Storage keys
   static const String _baseUriKey = 'webdav_base_uri';
   static const String _usernameKey = 'webdav_username';
@@ -54,8 +57,8 @@ class WebDAVAuth {
   /// Checks if WebDAV is configured and authenticated
   static Future<bool> isAuthenticated() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      return prefs.getBool(_isAuthenticatedKey) ?? false;
+      final isAuthenticated = await _storage.read(key: _isAuthenticatedKey);
+      return isAuthenticated == 'true';
     } catch (e) {
       print('Error checking WebDAV authentication: $e');
       return false;
@@ -73,11 +76,10 @@ class WebDAVAuth {
   /// Signs out by clearing stored credentials
   static Future<void> signOut() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_baseUriKey);
-      await prefs.remove(_usernameKey);
-      await prefs.remove(_passwordKey);
-      await prefs.setBool(_isAuthenticatedKey, false);
+      await _storage.delete(key: _baseUriKey);
+      await _storage.delete(key: _usernameKey);
+      await _storage.delete(key: _passwordKey);
+      await _storage.write(key: _isAuthenticatedKey, value: 'false');
       print('Signed out from WebDAV');
     } catch (e) {
       print('Error signing out from WebDAV: $e');
@@ -86,20 +88,21 @@ class WebDAVAuth {
   
   /// Saves WebDAV configuration
   static Future<void> saveConfiguration(String baseUri, String username, String password) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_baseUriKey, baseUri);
-    await prefs.setString(_usernameKey, username);
-    await prefs.setString(_passwordKey, password);
-    await prefs.setBool(_isAuthenticatedKey, true);
+    await _storage.write(key: _baseUriKey, value: baseUri);
+    await _storage.write(key: _usernameKey, value: username);
+    await _storage.write(key: _passwordKey, value: password);
+    await _storage.write(key: _isAuthenticatedKey, value: 'true');
   }
   
   /// Gets stored WebDAV configuration
   static Future<Map<String, String>> getConfiguration() async {
-    final prefs = await SharedPreferences.getInstance();
+    final baseUri = await _storage.read(key: _baseUriKey) ?? '';
+    final username = await _storage.read(key: _usernameKey) ?? '';
+    final password = await _storage.read(key: _passwordKey) ?? '';
     return {
-      'baseUri': prefs.getString(_baseUriKey) ?? '',
-      'username': prefs.getString(_usernameKey) ?? '',
-      'password': prefs.getString(_passwordKey) ?? '',
+      'baseUri': baseUri,
+      'username': username,
+      'password': password,
     };
   }
   

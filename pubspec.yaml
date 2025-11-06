@@ -45,6 +45,7 @@ dependencies:
   workmanager: ^0.9.0
   app_links: ^6.4.1
   flutter_custom_tabs: ^2.0.0+1
+  flutter_secure_storage: ^9.2.2
 
 dev_dependencies:
   flutter_test:
