@@ -2,8 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 	<dict>
-	    <key>GIDClientID</key>
-        <string>477555139342-ul09dfb30dd90arskfgu79p44nt0i4fl.apps.googleusercontent.com</string>		<key>CFBundleDevelopmentRegion</key>
+		<key>GIDClientID</key>
+		<string>477555139342-ul09dfb30dd90arskfgu79p44nt0i4fl.apps.googleusercontent.com</string>
+		<key>CFBundleDevelopmentRegion</key>
 		<string>$(DEVELOPMENT_LANGUAGE)</string>
 		<key>CFBundleDisplayName</key>
 		<string>WitnessBackup</string>
@@ -54,36 +55,36 @@
 		<string>This app needs photo library access to save videos.</string>
 		<key>NSPhotoLibraryAddUsageDescription</key>
 		<string>This app needs permission to add videos to your photo library.</string>
-	<key>UIStatusBarHidden</key>
-	<false/>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>fetch</string>
-		<string>processing</string>
-		<string>remote-notification</string>
-	</array>
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
-			<key>CFBundleURLName</key>
-			<string>com.google</string>
-			<key>CFBundleURLSchemes</key>
-            <array>
-            <string>com.googleusercontent.apps.477555139342-ul09dfb30dd90arskfgu79p44nt0i4fl</string>
-            </array>
-		</dict>
-		<dict>
-			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
-			<key>CFBundleURLName</key>
-			<string>org.doodledome.witnessbackup</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
+		<key>UIStatusBarHidden</key>
+		<false/>
+		<key>UIBackgroundModes</key>
+		<array>
+			<string>fetch</string>
+			<string>processing</string>
+			<string>remote-notification</string>
+		</array>
+		<key>CFBundleURLTypes</key>
+		<array>
+			<dict>
+				<key>CFBundleTypeRole</key>
+				<string>Editor</string>
+				<key>CFBundleURLName</key>
+				<string>com.google</string>
+				<key>CFBundleURLSchemes</key>
+				<array>
+					<string>com.googleusercontent.apps.477555139342-ul09dfb30dd90arskfgu79p44nt0i4fl</string>
+				</array>
+			</dict>
+			<dict>
+				<key>CFBundleTypeRole</key>
+				<string>Editor</string>
+				<key>CFBundleURLName</key>
 				<string>org.doodledome.witnessbackup</string>
-			</array>
-		</dict>
-	</array>
-</dict>
+				<key>CFBundleURLSchemes</key>
+				<array>
+					<string>org.doodledome.witnessbackup</string>
+				</array>
+			</dict>
+		</array>
+	</dict>
 </plist>

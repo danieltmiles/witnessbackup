@@ -70,19 +70,34 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  # This section tells Flutter to include your icons in the build
+  assets:
+    - assets/app_icons/
+
+# This tool creates your app launcher icon
 flutter_launcher_icons:
+  # === Android ===
   android: true
+  adaptive_icon_foreground: "assets/app_icons/icon_foreground.png"
+  adaptive_icon_background: "#1A1E31" # The background color
+
+  # === iOS ===
   ios: true
-  image_path: "android/witness_backup_logo.png"
+  image_path: "assets/app_icons/icon_playstore.png" # iOS uses a single, non-transparent icon
   remove_alpha_ios: true
-  
+
+# This tool creates your splash screen
 flutter_native_splash:
-  color: "#FFFFFF"
-  image: "android/witness_backup_logo.png"
-  android: true
+  color: "#1A1E31"
+  image: "assets/app_icons/icon_splash.png"
+
+  # Android 12 specific settings (uses the same assets)
+  android_12:
+    color: "#1A1E31"
+    image: "assets/app_icons/icon_splash.png"
+
+  # iOS settings (uses the same assets)
   ios: true
-  android_gravity: center
-  ios_content_mode: center
 
   # To add assets to your application, add an assets section, like this:
   # assets:

@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_custom_tabs/flutter_custom_tabs.dart' as custom_tabs;
 import 'package:crypto/crypto.dart';
 import 'dart:math';
@@ -51,8 +50,7 @@ class DropboxProvider implements CloudStorageProvider {
 class DropboxAuth {
   // Dropbox OAuth configuration
   // NOTE: Replace these with your actual Dropbox app credentials
-  static const String _appKey = 'hzipa0672whuil3';
-  static const String _appSecret = '2gxvvac1a36rd11';
+  static const String _appKey = 'wc10ca6zcclali8';
   // Use custom scheme for mobile OAuth callback (matches AndroidManifest.xml)
   static const String _redirectUri = 'org.doodledome.witnessbackup://oauth-callback';
   
@@ -71,21 +69,6 @@ class DropboxAuth {
   static Future<bool> authenticate(BuildContext context) async {
     try {
       print('=== Dropbox OAuth Debug ===');
-      
-      // Check if app credentials are configured
-      if (_appKey == 'YOUR_DROPBOX_APP_KEY' || _appSecret == 'YOUR_DROPBOX_APP_SECRET') {
-        print('Error: Dropbox app credentials not configured');
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Dropbox app credentials not configured. Please set up your Dropbox app key and secret.'),
-              backgroundColor: Colors.red,
-              duration: Duration(seconds: 5),
-            ),
-          );
-        }
-        return false;
-      }
       
       // Generate PKCE parameters
       final codeVerifier = _generateCodeVerifier();
@@ -235,7 +218,7 @@ class DropboxAuth {
       // Exchange authorization code for tokens
       if (code != null && codeVerifier != null) {
         print('Exchanging authorization code for tokens...');
-        
+
         final tokenResponse = await http.post(
           Uri.parse(_tokenEndpoint),
           headers: {
@@ -245,30 +228,29 @@ class DropboxAuth {
             'code': code,
             'grant_type': 'authorization_code',
             'client_id': _appKey,
-            'client_secret': _appSecret,
             'redirect_uri': _redirectUri,
             'code_verifier': codeVerifier,
           },
         );
-        
+
         if (tokenResponse.statusCode == 200) {
           final tokenData = jsonDecode(tokenResponse.body);
           final accessToken = tokenData['access_token'];
           final refreshToken = tokenData['refresh_token'];
-          
+
           // Store tokens
           await prefs.setString(_accessTokenKey, accessToken);
           if (refreshToken != null) {
             await prefs.setString(_refreshTokenKey, refreshToken);
           }
           await prefs.setBool(_isAuthenticatedKey, true);
-          
+
           // Clean up temporary PKCE parameters
           await prefs.remove('dropbox_code_verifier');
           await prefs.remove('dropbox_state');
-          
+
           print('Successfully authenticated with Dropbox');
-          
+
           if (context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
@@ -285,7 +267,7 @@ class DropboxAuth {
           return false;
         }
       }
-      
+
       return false;
     } catch (e, stackTrace) {
       print('=== Dropbox OAuth Error ===');
