@@ -559,7 +559,22 @@ class _VideoRecorderState extends State<VideoRecorder> {
         future: _initializeControllerFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.done) {
-            return CameraPreview(_controller);
+            final orientation = MediaQuery.of(context).orientation;
+            final previewSize = _controller.value.previewSize!;
+            return Center(
+              child: FittedBox(
+                fit: BoxFit.contain,
+                child: SizedBox(
+                  width: (orientation == Orientation.landscape)
+                      ? previewSize.width
+                      : previewSize.height,
+                  height: (orientation == Orientation.landscape)
+                      ? previewSize.height
+                      : previewSize.width,
+                  child: CameraPreview(_controller),
+                ),
+              ),
+            );
           } else {
             return const Center(child: CircularProgressIndicator());
           }
