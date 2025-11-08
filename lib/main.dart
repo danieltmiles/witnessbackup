@@ -663,15 +663,15 @@ class _SettingsPageState extends State<SettingsPage> {
   String _resolutionToDisplayString(ResolutionPreset preset) {
     switch (preset) {
       case ResolutionPreset.low:
-        return 'Low (352x288)';
+        return 'Low (${Platform.isAndroid ? '~240p' : '352x248'})';
       case ResolutionPreset.medium:
-        return 'Medium (720x480)';
+        return 'Medium (~480p)';
       case ResolutionPreset.high:
-        return 'High (1280x720)';
+        return 'High (~720p)';
       case ResolutionPreset.veryHigh:
-        return 'Very High (1920x1080)';
+        return 'Very High (~1080p)';
       case ResolutionPreset.ultraHigh:
-        return 'Ultra High (3840x2160)';
+        return 'Ultra High (~2160p)';
       case ResolutionPreset.max:
         return 'Max (Highest Available)';
     }
@@ -700,7 +700,9 @@ class _SettingsPageState extends State<SettingsPage> {
               border: OutlineInputBorder(),
               labelText: 'Select Resolution',
             ),
-            items: ResolutionPreset.values.map((preset) {
+            items: ResolutionPreset.values
+                .where((preset) => preset != ResolutionPreset.max)
+                .map((preset) {
               return DropdownMenuItem(
                 value: preset,
                 child: Text(_resolutionToDisplayString(preset)),
