@@ -506,20 +506,17 @@ class _VideoRecorderState extends State<VideoRecorder> {
         future: _initializeControllerFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.done) {
-            final orientation = MediaQuery.of(context).orientation;
-            final previewSize = _controller.value.previewSize!;
-            return Center(
-              child: FittedBox(
-                fit: BoxFit.contain,
-                child: SizedBox(
-                  width: (orientation == Orientation.landscape)
-                      ? previewSize.width
-                      : previewSize.height,
-                  height: (orientation == Orientation.landscape)
-                      ? previewSize.height
-                      : previewSize.width,
-                  child: CameraPreview(_controller),
-                ),
+            // Calculate the scale to fit the preview in the screen
+            final size = MediaQuery.of(context).size;
+            var scale = size.aspectRatio * _controller.value.aspectRatio;
+
+            // to prevent scaling down, invert the scale
+            if (scale < 1) scale = 1 / scale;
+
+            return Transform.scale(
+              scale: scale,
+              child: Center(
+                child: CameraPreview(_controller),
               ),
             );
           } else {
