@@ -441,61 +441,6 @@ class _VideoRecorderState extends State<VideoRecorder> {
         actions: [
           InkWell(
             onTap: () async {
-              if (_isRecording) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Cannot switch camera while recording'),
-                    duration: Duration(seconds: 2),
-                  ),
-                );
-                return;
-              }
-
-              // Find the opposite camera
-              CameraDescription? targetCamera;
-              if (_currentCamera.lensDirection == CameraLensDirection.back) {
-                targetCamera = widget.cameras.firstWhere(
-                  (camera) => camera.lensDirection == CameraLensDirection.front,
-                  orElse: () => _currentCamera,
-                );
-              } else {
-                targetCamera = widget.cameras.firstWhere(
-                  (camera) => camera.lensDirection == CameraLensDirection.back,
-                  orElse: () => _currentCamera,
-                );
-              }
-
-              if (targetCamera != _currentCamera) {
-                await _controller.dispose();
-                setState(() {
-                  _currentCamera = targetCamera!;
-                  _controller = CameraController(
-                    _currentCamera,
-                    _currentResolution,
-                  );
-                  _initializeControllerFuture = _controller.initialize();
-                });
-              }
-            },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.autorenew),
-                  const SizedBox(height: 2),
-                  Text(
-                    _currentCamera.lensDirection == CameraLensDirection.back
-                        ? 'Front Camera'
-                        : 'Rear Camera',
-                    style: const TextStyle(fontSize: 10),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          InkWell(
-            onTap: () async {
               await Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -582,15 +527,65 @@ class _VideoRecorderState extends State<VideoRecorder> {
           }
         },
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          if (_isRecording) {
-            _stopRecording();
-          } else {
-            _startRecording();
-          }
-        },
-        child: Icon(_isRecording ? Icons.stop : Icons.videocam),
+      bottomNavigationBar: BottomAppBar(
+        color: Colors.transparent,
+        elevation: 0,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: <Widget>[
+            const SizedBox(width: 48), // Placeholder for left side
+            FloatingActionButton(
+              onPressed: () {
+                if (_isRecording) {
+                  _stopRecording();
+                } else {
+                  _startRecording();
+                }
+              },
+              child: Icon(_isRecording ? Icons.stop : Icons.videocam),
+            ),
+            IconButton(
+              icon: const Icon(Icons.autorenew),
+              onPressed: () async {
+                if (_isRecording) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Cannot switch camera while recording'),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                  return;
+                }
+
+                // Find the opposite camera
+                CameraDescription? targetCamera;
+                if (_currentCamera.lensDirection == CameraLensDirection.back) {
+                  targetCamera = widget.cameras.firstWhere(
+                    (camera) => camera.lensDirection == CameraLensDirection.front,
+                    orElse: () => _currentCamera,
+                  );
+                } else {
+                  targetCamera = widget.cameras.firstWhere(
+                    (camera) => camera.lensDirection == CameraLensDirection.back,
+                    orElse: () => _currentCamera,
+                  );
+                }
+
+                if (targetCamera != _currentCamera) {
+                  await _controller.dispose();
+                  setState(() {
+                    _currentCamera = targetCamera!;
+                    _controller = CameraController(
+                      _currentCamera,
+                      _currentResolution,
+                    );
+                    _initializeControllerFuture = _controller.initialize();
+                  });
+                }
+              },
+            ),
+          ],
+        ),
       ),
       ),
     );
