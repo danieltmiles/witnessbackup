@@ -7,6 +7,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:app_links/app_links.dart';
+import 'package:gallery_saver_plus/gallery_saver.dart';
 import 'cloud_storage_provider.dart';
 import 'webdav.dart' show WebDAVAuth;
 import 'dropbox.dart' show DropboxAuth;
@@ -547,6 +548,11 @@ class _VideoRecorderState extends State<VideoRecorder> {
           duration: const Duration(seconds: 2),
         ),
       );
+      
+      // On Android, notify the system to scan for the new media file
+      if (Platform.isAndroid) {
+        unawaited(GallerySaver.saveVideo(destinationPath));
+      }
       
       // Schedule background upload using the persistent background service
       final prefs = await SharedPreferences.getInstance();

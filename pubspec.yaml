@@ -46,6 +46,7 @@ dependencies:
   app_links: ^6.4.1
   flutter_custom_tabs: ^2.0.0+1
   flutter_secure_storage: ^9.2.2
+  gallery_saver_plus: ^3.2.9
 
 dev_dependencies:
   flutter_test:
