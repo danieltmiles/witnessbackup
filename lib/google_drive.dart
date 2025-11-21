@@ -49,77 +49,75 @@ class GoogleDriveAuth {
   // Secure storage instance
   static const _storage = FlutterSecureStorage();
 
-  // GoogleSignIn instance configured for Drive access
-  static final GoogleSignIn _googleSignIn = GoogleSignIn(
-    scopes: [
-      'https://www.googleapis.com/auth/drive.file',
-    ],
-  );
+  // GoogleSignIn singleton instance
+  static final GoogleSignIn _googleSignIn = GoogleSignIn.instance;
   
   // Storage keys
   static const String _isAuthenticatedKey = 'google_drive_is_authenticated';
   
+  // Track initialization
+  static bool _isInitialized = false;
+  
+  // Required scopes for Google Drive access
+  static const List<String> _scopes = [
+    'https://www.googleapis.com/auth/drive.file',
+  ];
+  
+  /// Ensures GoogleSignIn is initialized
+  static Future<void> _ensureInitialized() async {
+    if (!_isInitialized) {
+      await _googleSignIn.initialize();
+      _isInitialized = true;
+      print('GoogleSignIn initialized');
+    }
+  }
+  
   /// Initiates the OAuth flow using google_sign_in
   static Future<bool> authenticate(BuildContext context) async {
     try {
+      await _ensureInitialized();
+      
       print('=== Google Drive Sign-In Debug ===');
       
-      // Check if already signed in
-      final currentUser = _googleSignIn.currentUser;
-      if (currentUser != null) {
-        print('Already signed in as: ${currentUser.email}');
-        await _saveAuthState(true);
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Already signed in as ${currentUser.email}'),
-              duration: const Duration(seconds: 2),
-            ),
-          );
-        }
-        return true;
+      // Attempt to authenticate with scope hint for combined auth+authorization
+      print('Attempting interactive sign-in...');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Opening Google Sign-In...'),
+            duration: Duration(seconds: 2),
+          ),
+        );
       }
       
-      // Attempt silent sign-in first
-      print('Attempting silent sign-in...');
-      var account = await _googleSignIn.signInSilently();
+      final account = await _googleSignIn.authenticate(scopeHint: _scopes);
       
-      // If silent sign-in fails, try interactive sign-in
-      if (account == null) {
-        print('Silent sign-in failed, attempting interactive sign-in...');
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Opening Google Sign-In...'),
-              duration: Duration(seconds: 2),
-            ),
-          );
-        }
-        
-        account = await _googleSignIn.signIn();
+      print('Successfully signed in as: ${account.email}');
+      
+      // Verify we have access token by trying to get authorization
+      final authClient = account.authorizationClient;
+      final authz = await authClient.authorizationForScopes(_scopes);
+      print('Access token obtained: ${authz?.accessToken != null}');
+      
+      await _saveAuthState(true);
+      
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Signed in as ${account.email}'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
       }
+      return true;
+    } on GoogleSignInException catch (e) {
+      print('=== Google Sign-In Exception ===');
+      print('Code: ${e.code}');
+      print('Description: ${e.description}');
       
-      if (account != null) {
-        print('Successfully signed in as: ${account.email}');
-        
-        // Get authentication headers to verify we have the required scope
-        final auth = await account.authentication;
-        print('Access token obtained: ${auth.accessToken != null}');
-        
-        await _saveAuthState(true);
-        
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Signed in as ${account.email}'),
-              backgroundColor: Colors.green,
-              duration: const Duration(seconds: 3),
-            ),
-          );
-        }
-        return true;
-      } else {
-        print('Sign-in was cancelled or failed');
+      // Handle cancelled sign-in gracefully
+      if (e.code == GoogleSignInExceptionCode.canceled) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -131,6 +129,17 @@ class GoogleDriveAuth {
         }
         return false;
       }
+      
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error during sign-in: ${e.description}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+      return false;
     } catch (e, stackTrace) {
       print('=== Google Sign-In Error ===');
       print('Error: $e');
@@ -153,18 +162,11 @@ class GoogleDriveAuth {
   /// This should be called on app startup to restore previous sessions
   static Future<bool> attemptSilentSignIn() async {
     try {
-      print('Attempting silent sign-in to restore Google Drive session...');
+      await _ensureInitialized();
       
-      // Check if already signed in
-      final currentUser = _googleSignIn.currentUser;
-      if (currentUser != null) {
-        print('Already signed in as: ${currentUser.email}');
-        await _saveAuthState(true);
-        return true;
-      }
+      print('Attempting lightweight authentication to restore Google Drive session...');
       
-      // Attempt silent sign-in
-      final account = await _googleSignIn.signInSilently();
+      final account = await _googleSignIn.attemptLightweightAuthentication();
       
       if (account != null) {
         print('Successfully restored session for: ${account.email}');
@@ -176,7 +178,7 @@ class GoogleDriveAuth {
         return false;
       }
     } catch (e) {
-      print('Error during silent sign-in: $e');
+      print('Error during lightweight authentication: $e');
       await _saveAuthState(false);
       return false;
     }
@@ -185,28 +187,31 @@ class GoogleDriveAuth {
   /// Checks if user is authenticated
   static Future<bool> isAuthenticated() async {
     try {
+      await _ensureInitialized();
+      
       final savedState = await _storage.read(key: _isAuthenticatedKey);
       
-      // Also verify with google_sign_in
-      final currentUser = _googleSignIn.currentUser;
+      // Try lightweight authentication to check current state
+      final account = await _googleSignIn.attemptLightweightAuthentication();
       
-      if (currentUser != null) {
-        // Verify the access token is still valid
-        final auth = await currentUser.authentication;
-        if (auth.accessToken != null && auth.accessToken!.isNotEmpty) {
+      if (account != null) {
+        // Verify we can get an access token
+        final authClient = account.authorizationClient;
+        final authz = await authClient.authorizationForScopes(_scopes);
+        if (authz?.accessToken != null) {
           await _saveAuthState(true);
           return true;
         }
       }
       
-      // If google_sign_in says not authenticated but we have saved state,
-      // attempt silent sign-in to restore the session
-      if (currentUser == null && savedState == 'true') {
-        print('User should be authenticated but no current session. Attempting silent sign-in...');
-        return await attemptSilentSignIn();
+      // If lightweight auth didn't work but we have saved state,
+      // the session may have expired
+      if (account == null && savedState == 'true') {
+        print('Saved session appears expired');
+        await _saveAuthState(false);
       }
       
-      return currentUser != null;
+      return account != null;
     } catch (e) {
       print('Error checking authentication: $e');
       return false;
@@ -216,13 +221,26 @@ class GoogleDriveAuth {
   /// Gets the current access token
   static Future<String?> getAccessToken() async {
     try {
-      final currentUser = _googleSignIn.currentUser;
-      if (currentUser == null) {
+      await _ensureInitialized();
+      
+      // Try to get current user through lightweight auth
+      final account = await _googleSignIn.attemptLightweightAuthentication();
+      if (account == null) {
         return null;
       }
       
-      final auth = await currentUser.authentication;
-      return auth.accessToken;
+      // Get authorization for the required scopes
+      final authClient = account.authorizationClient;
+      final authz = await authClient.authorizationForScopes(_scopes);
+      
+      if (authz == null) {
+        // If we can't get authorization without prompting, try to authorize with prompt
+        print('Authorization not available, attempting to authorize scopes...');
+        final authzWithPrompt = await authClient.authorizeScopes(_scopes);
+        return authzWithPrompt.accessToken;
+      }
+      
+      return authz.accessToken;
     } catch (e) {
       print('Error getting access token: $e');
       return null;
@@ -232,6 +250,7 @@ class GoogleDriveAuth {
   /// Signs out the user
   static Future<void> signOut() async {
     try {
+      await _ensureInitialized();
       await _googleSignIn.signOut();
       await _saveAuthState(false);
       print('Signed out from Google Drive');
@@ -240,7 +259,7 @@ class GoogleDriveAuth {
     }
   }
   
-  /// Saves authentication state to SharedPreferences
+  /// Saves authentication state to secure storage
   static Future<void> _saveAuthState(bool isAuthenticated) async {
     await _storage.write(key: _isAuthenticatedKey, value: isAuthenticated.toString());
   }
@@ -457,7 +476,7 @@ class GoogleDriveAuth {
           Uri.parse(uploadUri),
           headers: {
             'Content-Length': chunk.length.toString(),
-            'Content-Range': 'bytes $rangeStart-$rangeEnd/${fileSize}',
+            'Content-Range': 'bytes $rangeStart-$rangeEnd/$fileSize',
           },
           body: chunk,
         );
