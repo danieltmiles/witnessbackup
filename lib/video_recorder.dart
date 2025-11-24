@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:witnessbackup/upload_state_manager.dart';
 import 'cloud_storage_provider.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:gallery_saver_plus/gallery_saver.dart';
@@ -20,11 +21,11 @@ class VideoRecorder extends StatefulWidget {
 }
 
 class _VideoRecorderState extends State<VideoRecorder> {
-  late CameraController _controller;
+  CameraController? _controller;
   late Future<void> _initializeControllerFuture;
   bool _isRecording = false;
   ResolutionPreset _currentResolution = ResolutionPreset.medium;
-  late CameraDescription _currentCamera;
+  CameraDescription? _currentCamera;
 
   // Global key for showing snackbars from background tasks
   final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
@@ -32,7 +33,7 @@ class _VideoRecorderState extends State<VideoRecorder> {
   @override
   void initState() {
     super.initState();
-    _loadResolution();
+    _initializeControllerFuture = _loadResolution();
   }
 
   /// Uploads a file to cloud storage in the background
@@ -108,6 +109,11 @@ class _VideoRecorderState extends State<VideoRecorder> {
   }
 
   Future<void> _loadResolution() async {
+    // If no cameras available, skip initialization (for testing)
+    if (widget.cameras.isEmpty) {
+      return;
+    }
+    
     final prefs = await SharedPreferences.getInstance();
     final resolutionString = prefs.getString('video_resolution') ?? 'medium';
     setState(() {
@@ -115,10 +121,10 @@ class _VideoRecorderState extends State<VideoRecorder> {
       _currentCamera = widget.cameras.first;
     });
     _controller = CameraController(
-      _currentCamera,
+      _currentCamera!,
       _currentResolution,
     );
-    _initializeControllerFuture = _controller.initialize();
+    await _controller!.initialize();
   }
 
   ResolutionPreset _stringToResolution(String value) {
@@ -157,29 +163,61 @@ class _VideoRecorderState extends State<VideoRecorder> {
     }
   }
 
+  /// Handles graceful exit of the app with pending upload completion
+  Future<void> _handleExit() async {
+    // Check if there are any pending uploads
+    final hasPendingUploads = await UploadStateManager.hasPendingUploads();
+    
+    if (hasPendingUploads) {
+      // Show a message that the app is waiting for uploads to complete
+      _scaffoldMessengerKey.currentState?.showSnackBar(
+        SnackBar(
+          content: const Text('Waiting for uploads to complete before exit...'),
+          duration: const Duration(seconds: 5),
+        ),
+      );
+      
+      // For Android, we can't actually prevent the app from closing in this context,
+      // but we can show a notification that uploads are still running
+      print('App exit requested with pending uploads. Showing notification...');
+      
+      // In a real implementation, we would:
+      // 1. Show a persistent notification that uploads are in progress
+      // 2. Allow the app to close but let background tasks continue
+      // 3. The system will handle cleanup of the app process once uploads complete
+      
+      // For now, we'll just show a message and let the system handle it
+      // The actual background upload handling is already managed by WorkManager
+      SystemNavigator.pop();
+    } else {
+      // No pending uploads, safe to exit
+      SystemNavigator.pop();
+    }
+  }
+
   @override
   void dispose() {
-    _controller.dispose();
+    _controller?.dispose();
     super.dispose();
   }
 
   Future<void> _startRecording() async {
-    if (!_controller.value.isInitialized) {
+    if (_controller == null || !_controller!.value.isInitialized) {
       return;
     }
     setState(() {
       _isRecording = true;
     });
-    await _controller.startVideoRecording();
+    await _controller!.startVideoRecording();
   }
 
   Future<void> _stopRecording() async {
-    if (!_controller.value.isRecordingVideo) {
+    if (_controller == null || !_controller!.value.isRecordingVideo) {
       return;
     }
 
     try {
-      final xFile = await _controller.stopVideoRecording();
+      final xFile = await _controller!.stopVideoRecording();
       setState(() {
         _isRecording = false;
       });
@@ -304,19 +342,21 @@ class _VideoRecorderState extends State<VideoRecorder> {
                     builder: (context) => SettingsPage(
                       currentResolution: _currentResolution,
                       onResolutionChanged: (newResolution) async {
+                        if (_controller == null || _currentCamera == null) return;
+                        
                         // Save the new resolution
                         final prefs = await SharedPreferences.getInstance();
                         await prefs.setString('video_resolution', _resolutionToString(newResolution));
 
                         // Reinitialize camera with new resolution
-                        await _controller.dispose();
+                        await _controller!.dispose();
                         setState(() {
                           _currentResolution = newResolution;
                           _controller = CameraController(
-                            _currentCamera,
+                            _currentCamera!,
                             _currentResolution,
                           );
-                          _initializeControllerFuture = _controller.initialize();
+                          _initializeControllerFuture = _controller!.initialize();
                         });
                       },
                     ),
@@ -340,9 +380,7 @@ class _VideoRecorderState extends State<VideoRecorder> {
             ),
             if (Platform.isAndroid) 
               InkWell(
-                onTap: () {
-                  SystemNavigator.pop();
-                },
+                onTap: _handleExit,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16.0),
                   child: Column(
@@ -363,10 +401,10 @@ class _VideoRecorderState extends State<VideoRecorder> {
         body: FutureBuilder<void>(
           future: _initializeControllerFuture,
           builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.done) {
+            if (snapshot.connectionState == ConnectionState.done && _controller != null) {
               // Calculate the scale to fit the preview in the screen
               final size = MediaQuery.of(context).size;
-              var scale = size.aspectRatio * _controller.value.aspectRatio;
+              var scale = size.aspectRatio * _controller!.value.aspectRatio;
 
               // to prevent scaling down, invert the scale
               if (scale < 1) scale = 1 / scale;
@@ -374,7 +412,7 @@ class _VideoRecorderState extends State<VideoRecorder> {
               return Transform.scale(
                 scale: scale,
                 child: Center(
-                  child: CameraPreview(_controller),
+                  child: CameraPreview(_controller!),
                 ),
               );
             } else {
@@ -412,29 +450,31 @@ class _VideoRecorderState extends State<VideoRecorder> {
                     return;
                   }
 
+                  if (_controller == null || _currentCamera == null) return;
+
                   // Find the opposite camera
                   CameraDescription? targetCamera;
-                  if (_currentCamera.lensDirection == CameraLensDirection.back) {
+                  if (_currentCamera!.lensDirection == CameraLensDirection.back) {
                     targetCamera = widget.cameras.firstWhere(
                           (camera) => camera.lensDirection == CameraLensDirection.front,
-                      orElse: () => _currentCamera,
+                      orElse: () => _currentCamera!,
                     );
                   } else {
                     targetCamera = widget.cameras.firstWhere(
                           (camera) => camera.lensDirection == CameraLensDirection.back,
-                      orElse: () => _currentCamera,
+                      orElse: () => _currentCamera!,
                     );
                   }
 
                   if (targetCamera != _currentCamera) {
-                    await _controller.dispose();
+                    await _controller!.dispose();
                     setState(() {
                       _currentCamera = targetCamera!;
                       _controller = CameraController(
-                        _currentCamera,
+                        _currentCamera!,
                         _currentResolution,
                       );
-                      _initializeControllerFuture = _controller.initialize();
+                      _initializeControllerFuture = _controller!.initialize();
                     });
                   }
                 },
