@@ -338,25 +338,26 @@ class _VideoRecorderState extends State<VideoRecorder> {
                 ),
               ),
             ),
-            InkWell(
-              onTap: () {
-                SystemNavigator.pop();
-              },
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.exit_to_app),
-                    const SizedBox(height: 2),
-                    const Text(
-                      'Exit',
-                      style: TextStyle(fontSize: 10),
-                    ),
-                  ],
+            if (Platform.isAndroid) 
+              InkWell(
+                onTap: () {
+                  SystemNavigator.pop();
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.exit_to_app),
+                      const SizedBox(height: 2),
+                      const Text(
+                        'Exit',
+                        style: TextStyle(fontSize: 10),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
           ],
         ),
         body: FutureBuilder<void>(
