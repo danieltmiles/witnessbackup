@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:app_links/app_links.dart';
+import 'package:flutter_custom_tabs/flutter_custom_tabs.dart' as custom_tabs;
 import 'dart:async';
 import 'dropbox.dart' show DropboxAuth;
 import 'video_recorder.dart';
@@ -53,15 +54,23 @@ class _WitnessBackupAppState extends State<WitnessBackupApp> {
     }
   }
 
-  void _handleDeepLink(Uri uri) {
+  void _handleDeepLink(Uri uri) async {
     print('Received deep link: ${uri.toString()}');
 
     try {
       // Check if this is a Dropbox OAuth callback
       if (uri.scheme == 'org.doodledome.witnessbackup' && uri.host == 'oauth-callback') {
+        // Close the Chrome Custom Tab / Safari View Controller
+        try {
+          await custom_tabs.closeCustomTabs();
+          print('Closed Custom Tab browser');
+        } catch (e) {
+          print('Error closing Custom Tab: $e');
+        }
+        
         final context = _navigatorKey.currentContext;
         if (context != null) {
-          DropboxAuth.handleOAuthCallback(uri, context);
+          await DropboxAuth.handleOAuthCallback(uri, context);
         }
       }
     } catch (e) {

@@ -31,7 +31,6 @@ void main() async {
           ),
         ),
       ));
-      return;
     }
     runApp(WitnessBackupApp(cameras: cameras));
   } else {
