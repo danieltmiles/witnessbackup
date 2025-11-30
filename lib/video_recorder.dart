@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:gallery_saver_plus/gallery_saver.dart';
 import 'background_upload_service.dart';
 import 'settings_page.dart';
+import 'camera_foreground_service.dart';
 
 class VideoRecorder extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -205,6 +206,16 @@ class _VideoRecorderState extends State<VideoRecorder> {
     if (_controller == null || !_controller!.value.isInitialized) {
       return;
     }
+    
+    // Check if background recording is enabled in settings
+    final prefs = await SharedPreferences.getInstance();
+    final backgroundRecordingEnabled = prefs.getBool('background_recording_enabled') ?? false;
+    
+    // Start foreground service only if background recording is enabled
+    if (backgroundRecordingEnabled) {
+      await CameraForegroundService.startService();
+    }
+    
     setState(() {
       _isRecording = true;
     });
@@ -218,6 +229,10 @@ class _VideoRecorderState extends State<VideoRecorder> {
 
     try {
       final xFile = await _controller!.stopVideoRecording();
+      
+      // Stop foreground service if it was started
+      await CameraForegroundService.stopService();
+      
       setState(() {
         _isRecording = false;
       });
@@ -308,6 +323,9 @@ class _VideoRecorderState extends State<VideoRecorder> {
         );
       }
     } catch (e) {
+      // Ensure we stop the foreground service even on error
+      await CameraForegroundService.stopService();
+      
       setState(() {
         _isRecording = false;
       });

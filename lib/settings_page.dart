@@ -25,6 +25,7 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _isGoogleDriveAuthenticated = false;
   bool _isWebDAVAuthenticated = false;
   bool _isDropboxAuthenticated = false;
+  bool _backgroundRecordingEnabled = false;
 
   // WebDAV configuration controllers
   final TextEditingController _webdavUriController = TextEditingController();
@@ -37,6 +38,7 @@ class _SettingsPageState extends State<SettingsPage> {
     super.initState();
     _selectedResolution = widget.currentResolution;
     _loadCloudStorage();
+    _loadBackgroundRecordingSetting();
   }
 
   @override
@@ -45,6 +47,14 @@ class _SettingsPageState extends State<SettingsPage> {
     _webdavUsernameController.dispose();
     _webdavPasswordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadBackgroundRecordingSetting() async {
+    final prefs = await SharedPreferences.getInstance();
+    final enabled = prefs.getBool('background_recording_enabled') ?? false;
+    setState(() {
+      _backgroundRecordingEnabled = enabled;
+    });
   }
 
   Future<void> _loadCloudStorage() async {
@@ -476,6 +486,108 @@ class _SettingsPageState extends State<SettingsPage> {
               fontSize: 12,
               fontStyle: FontStyle.italic,
               color: Colors.grey,
+            ),
+          ),
+          const SizedBox(height: 32),
+          const Divider(),
+          const SizedBox(height: 16),
+          const Text(
+            'Recording',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Card(
+            child: SwitchListTile(
+              title: const Text('Enable Background Recording'),
+              subtitle: Text(
+                _backgroundRecordingEnabled
+                    ? 'Recording will continue when app is in background'
+                    : 'Recording will stop when app is backgrounded',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: _backgroundRecordingEnabled ? Colors.green : Colors.grey,
+                ),
+              ),
+              value: _backgroundRecordingEnabled,
+              onChanged: (bool value) async {
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setBool('background_recording_enabled', value);
+                setState(() {
+                  _backgroundRecordingEnabled = value;
+                });
+                
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        value
+                            ? 'Background recording enabled'
+                            : 'Background recording disabled',
+                      ),
+                      duration: const Duration(seconds: 2),
+                    ),
+                  );
+                }
+              },
+              secondary: Icon(
+                _backgroundRecordingEnabled ? Icons.videocam : Icons.videocam_off,
+                color: _backgroundRecordingEnabled ? Colors.green : Colors.grey,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      size: 16,
+                      color: Colors.blue[700],
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Privacy Notice',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue[700],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'When enabled:',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  Platform.isAndroid
+                      ? '• A persistent notification will show while recording\n'
+                        '• Recording continues even when app is in background\n'
+                        '• Uses more battery power'
+                      : '• A red indicator appears in the status bar\n'
+                        '• Recording continues even when app is in background\n'
+                        '• Uses more battery power',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey,
+                    height: 1.4,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
