@@ -135,6 +135,7 @@ class BackgroundUploadService {
       
       // Perform the upload with progress tracking and resume support
       print('Starting upload to ${provider.displayName}: ${task.fileName}');
+      print('[BackgroundUploadService] Creating onProgress callback for taskId=$taskId');
       if (task.uploadedBytes != null && task.uploadedBytes! > 0) {
         print('Resuming from byte ${task.uploadedBytes} of ${task.totalBytes}');
       }
@@ -147,6 +148,7 @@ class BackgroundUploadService {
         startByte: task.uploadedBytes,
         onProgress: (uploaded, total, sessionUri) async {
           // Save progress to persistent storage
+          print('[BackgroundUploadService.onProgress] Received callback: uploaded=$uploaded, total=$total');
           await UploadStateManager.updateProgress(
             taskId, 
             uploaded, 

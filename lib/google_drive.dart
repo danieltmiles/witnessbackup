@@ -325,8 +325,12 @@ class GoogleDriveAuth {
     Function(int uploaded, int total, String? sessionUri)? onProgress,
   }) async {
     final fileBytes = await file.readAsBytes();
+    final fileSize = fileBytes.length;
     final mimeType = _getMimeType(fileName);
     print('MIME type: $mimeType');
+    
+    // Report initial progress
+    onProgress?.call(0, fileSize, null);
     
     // Create metadata for the file
     final metadata = {
@@ -374,6 +378,8 @@ class GoogleDriveAuth {
       final fileId = responseData['id'];
       print('Successfully uploaded file to Google Drive');
       print('File ID: $fileId');
+      // Report completion
+      onProgress?.call(fileSize, fileSize, null);
       return true;
     } else {
       print('Upload failed with status code: ${response.statusCode}');

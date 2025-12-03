@@ -196,10 +196,10 @@ class WebDAVAuth {
       
       if (fileSize <= chunkSize) {
         // For small files, use simple upload
-        return await _uploadSimple(file, fileName, baseUri, username, password);
+        return await _uploadSimple(file, fileName, baseUri, username, password, onProgress);
       } else {
         // For large files, use chunked upload
-        return await _uploadChunked(file, fileName, baseUri, username, password, fileSize, chunkSize);
+        return await _uploadChunked(file, fileName, baseUri, username, password, fileSize, chunkSize, onProgress);
       }
     } catch (e, stackTrace) {
       print('Error uploading file to WebDAV: $e');
@@ -209,8 +209,21 @@ class WebDAVAuth {
   }
   
   /// Simple upload for small files
-  static Future<bool> _uploadSimple(File file, String fileName, String baseUri, String username, String password) async {
+  static Future<bool> _uploadSimple(
+    File file, 
+    String fileName, 
+    String baseUri, 
+    String username, 
+    String password,
+    Function(int uploaded, int total, String? sessionUri)? onProgress,
+  ) async {
     final fileBytes = await file.readAsBytes();
+    final fileSize = fileBytes.length;
+    
+    // Report initial progress
+    print('[WebDAV._uploadSimple] onProgress callback is ${onProgress != null ? "SET" : "NULL"}');
+    print('[WebDAV._uploadSimple] Calling onProgress(0, $fileSize, null)');
+    onProgress?.call(0, fileSize, null);
     
     // Ensure the base URI ends with a slash
     final normalizedUri = baseUri.endsWith('/') ? baseUri : '$baseUri/';
@@ -239,6 +252,9 @@ class WebDAVAuth {
     
     if (response.statusCode == 201 || response.statusCode == 204 || response.statusCode == 200) {
       print('Successfully uploaded file to WebDAV server');
+      // Report completion
+      print('[WebDAV._uploadSimple] Calling onProgress($fileSize, $fileSize, null) - COMPLETE');
+      onProgress?.call(fileSize, fileSize, null);
       return true;
     } else {
       print('Upload failed with status code: ${response.statusCode}');
@@ -248,7 +264,16 @@ class WebDAVAuth {
   }
   
   /// Chunked upload for large files
-  static Future<bool> _uploadChunked(File file, String fileName, String baseUri, String username, String password, int fileSize, int chunkSize) async {
+  static Future<bool> _uploadChunked(
+    File file, 
+    String fileName, 
+    String baseUri, 
+    String username, 
+    String password, 
+    int fileSize, 
+    int chunkSize,
+    Function(int uploaded, int total, String? sessionUri)? onProgress,
+  ) async {
     // Ensure the base URI ends with a slash
     final normalizedUri = baseUri.endsWith('/') ? baseUri : '$baseUri/';
     final uploadUri = Uri.parse('$normalizedUri$fileName');
@@ -261,6 +286,11 @@ class WebDAVAuth {
     final mimeType = _getMimeType(fileName);
     print('MIME type: $mimeType');
     print('Using chunked upload with chunk size: ${chunkSize ~/ (1024 * 1024)} MB');
+    
+    // Report initial progress
+    print('[WebDAV._uploadChunked] onProgress callback is ${onProgress != null ? "SET" : "NULL"}');
+    print('[WebDAV._uploadChunked] Calling onProgress(0, $fileSize, null)');
+    onProgress?.call(0, fileSize, null);
     
     // Open file for reading
     final randomAccessFile = await file.open(mode: FileMode.read);
@@ -301,6 +331,10 @@ class WebDAVAuth {
         // 201/204/200 for complete upload, 308 for partial (resume incomplete)
         if (response.statusCode == 201 || response.statusCode == 204 || response.statusCode == 200 || response.statusCode == 308) {
           uploadedBytes += chunk.length;
+          
+          // Report progress after each chunk
+          print('[WebDAV._uploadChunked] Calling onProgress($uploadedBytes, $fileSize, null)');
+          onProgress?.call(uploadedBytes, fileSize, null);
           
           if (uploadedBytes >= fileSize) {
             print('Successfully uploaded all chunks to WebDAV server');

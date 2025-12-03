@@ -389,6 +389,10 @@ class DropboxAuth {
     Function(int uploaded, int total, String? sessionUri)? onProgress,
   }) async {
     final fileBytes = await file.readAsBytes();
+    final fileSize = fileBytes.length;
+    
+    // Report initial progress
+    onProgress?.call(0, fileSize, null);
     
     print('Uploading file (simple mode)...');
     
@@ -415,6 +419,8 @@ class DropboxAuth {
       final fileId = responseData['id'];
       print('Successfully uploaded file to Dropbox');
       print('File ID: $fileId');
+      // Report completion
+      onProgress?.call(fileSize, fileSize, null);
       return true;
     } else {
       print('Upload failed with status code: ${response.statusCode}');

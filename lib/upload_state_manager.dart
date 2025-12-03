@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -66,6 +67,29 @@ class UploadTask {
 class UploadStateManager {
   static const String _uploadQueueKey = 'upload_queue';
   static const int maxRetries = 3;
+  
+  // Stream controller for broadcasting upload progress updates
+  static final StreamController<List<UploadTask>> _progressController = 
+      StreamController<List<UploadTask>>.broadcast();
+  
+  /// Stream of upload tasks for UI updates
+  static Stream<List<UploadTask>> get progressStream => _progressController.stream;
+  
+  /// Broadcasts the current state of all tasks
+  static Future<void> _broadcastProgress() async {
+    final tasks = await getAllTasks();
+    print('[UploadStateManager] Broadcasting ${tasks.length} tasks to UI stream');
+    for (final task in tasks) {
+      print('[UploadStateManager] Task: ${task.fileName}, status: ${task.status}, uploaded: ${task.uploadedBytes}/${task.totalBytes}');
+    }
+    _progressController.add(tasks);
+  }
+  
+  /// Public method to refresh and broadcast current tasks
+  /// Call this when the UI needs to load existing tasks
+  static Future<void> refreshTasks() async {
+    await _broadcastProgress();
+  }
 
   /// Adds a new upload task to the queue
   static Future<void> addTask(UploadTask task) async {
@@ -73,12 +97,15 @@ class UploadStateManager {
     final tasks = await getAllTasks();
     tasks.add(task);
     await _saveTasks(tasks);
+    await _broadcastProgress();
     print('Added upload task: ${task.fileName} (${task.id})');
   }
 
   /// Gets all upload tasks
   static Future<List<UploadTask>> getAllTasks() async {
     final prefs = await SharedPreferences.getInstance();
+    // Force reload from disk to get updates from background isolate
+    await prefs.reload();
     final jsonString = prefs.getString(_uploadQueueKey);
     if (jsonString == null) return [];
 
@@ -106,23 +133,29 @@ class UploadStateManager {
     if (index != -1) {
       tasks[index] = updatedTask;
       await _saveTasks(tasks);
+      await _broadcastProgress();
       print('Updated upload task: ${updatedTask.fileName} - ${updatedTask.status}');
     }
   }
 
   /// Updates progress for a specific task
   static Future<void> updateProgress(String taskId, int uploadedBytes, int totalBytes, {String? sessionUri}) async {
+    print('[UploadStateManager.updateProgress] Called with taskId=$taskId, uploaded=$uploadedBytes, total=$totalBytes');
     final tasks = await getAllTasks();
     final index = tasks.indexWhere((task) => task.id == taskId);
     if (index != -1) {
       tasks[index].uploadedBytes = uploadedBytes;
       tasks[index].totalBytes = totalBytes;
+      tasks[index].status = 'uploading'; // Ensure status is set to uploading
       if (sessionUri != null) {
         tasks[index].resumableSessionUri = sessionUri;
       }
       await _saveTasks(tasks);
+      await _broadcastProgress();
       final percentComplete = (uploadedBytes * 100 / totalBytes).toStringAsFixed(1);
-      print('Upload progress for ${tasks[index].fileName}: $percentComplete% ($uploadedBytes/$totalBytes bytes)');
+      print('[UploadStateManager.updateProgress] Updated ${tasks[index].fileName}: $percentComplete% ($uploadedBytes/$totalBytes bytes)');
+    } else {
+      print('[UploadStateManager.updateProgress] ERROR: Task not found with id=$taskId');
     }
   }
 
@@ -133,9 +166,13 @@ class UploadStateManager {
     if (index != -1) {
       tasks[index].status = 'completed';
       print('Completed upload task: ${tasks[index].fileName}');
+      await _saveTasks(tasks);
+      await _broadcastProgress();
       // Remove completed tasks after a delay to allow for status display
+      await Future.delayed(const Duration(seconds: 2));
       tasks.removeAt(index);
       await _saveTasks(tasks);
+      await _broadcastProgress();
     }
   }
 
@@ -148,6 +185,7 @@ class UploadStateManager {
       tasks[index].errorMessage = errorMessage;
       tasks[index].retryCount++;
       await _saveTasks(tasks);
+      await _broadcastProgress();
       print('Failed upload task: ${tasks[index].fileName} - Retry ${tasks[index].retryCount}/$maxRetries');
     }
   }
@@ -157,6 +195,7 @@ class UploadStateManager {
     final tasks = await getAllTasks();
     tasks.removeWhere((task) => task.id == taskId);
     await _saveTasks(tasks);
+    await _broadcastProgress();
   }
 
   /// Clears all completed and failed tasks
