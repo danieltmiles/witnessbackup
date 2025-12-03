@@ -27,6 +27,7 @@ class _VideoRecorderState extends State<VideoRecorder> with WidgetsBindingObserv
   bool _isRecording = false;
   ResolutionPreset _currentResolution = ResolutionPreset.medium;
   CameraDescription? _currentCamera;
+  bool _isFlashlightOn = false;
   
   // Timer for polling upload progress (needed because WorkManager runs in separate isolate)
   Timer? _uploadProgressTimer;
@@ -274,6 +275,48 @@ class _VideoRecorderState extends State<VideoRecorder> with WidgetsBindingObserv
       _isRecording = true;
     });
     await _controller!.startVideoRecording();
+  }
+
+  /// Toggles the flashlight on/off
+  Future<void> _toggleFlashlight() async {
+    if (_controller == null || !_controller!.value.isInitialized) {
+      return;
+    }
+
+    try {
+      if (_isFlashlightOn) {
+        await _controller!.setFlashMode(FlashMode.off);
+        setState(() {
+          _isFlashlightOn = false;
+        });
+        _scaffoldMessengerKey.currentState?.showSnackBar(
+          const SnackBar(
+            content: Text('Flashlight OFF'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      } else {
+        await _controller!.setFlashMode(FlashMode.torch);
+        setState(() {
+          _isFlashlightOn = true;
+        });
+        _scaffoldMessengerKey.currentState?.showSnackBar(
+          const SnackBar(
+            content: Text('Flashlight ON'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
+    } catch (e) {
+      print('Error toggling flashlight: $e');
+      _scaffoldMessengerKey.currentState?.showSnackBar(
+        SnackBar(
+          content: Text('Error toggling flashlight: $e'),
+          duration: const Duration(seconds: 2),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   Future<void> _stopRecording() async {
@@ -615,7 +658,10 @@ class _VideoRecorderState extends State<VideoRecorder> with WidgetsBindingObserv
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: <Widget>[
-                  const SizedBox(width: 48), // Placeholder for left side
+                  IconButton(
+                    icon: Icon(_isFlashlightOn ? Icons.flash_on : Icons.flash_off),
+                    onPressed: _toggleFlashlight,
+                  ),
                   FloatingActionButton(
                     onPressed: () {
                       if (_isRecording) {
