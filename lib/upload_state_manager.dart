@@ -79,6 +79,9 @@ class UploadStateManager {
   static Future<void> _broadcastProgress() async {
     final tasks = await getAllTasks();
     print('[UploadStateManager] Broadcasting ${tasks.length} tasks to UI stream');
+    if (tasks.isEmpty) {
+      print('[UploadStateManager] Broadcasting empty task list - progress bar should hide');
+    }
     for (final task in tasks) {
       print('[UploadStateManager] Task: ${task.fileName}, status: ${task.status}, uploaded: ${task.uploadedBytes}/${task.totalBytes}');
     }
@@ -164,14 +167,22 @@ class UploadStateManager {
     final tasks = await getAllTasks();
     final index = tasks.indexWhere((task) => task.id == taskId);
     if (index != -1) {
+      // Ensure uploadedBytes equals totalBytes to show 100% completion
+      if (tasks[index].totalBytes != null && tasks[index].totalBytes! > 0) {
+        tasks[index].uploadedBytes = tasks[index].totalBytes;
+      }
       tasks[index].status = 'completed';
-      print('Completed upload task: ${tasks[index].fileName}');
+      final completedFileName = tasks[index].fileName;
+      print('Completed upload task: $completedFileName');
       await _saveTasks(tasks);
       await _broadcastProgress();
       // Remove completed tasks after a delay to allow for status display
-      await Future.delayed(const Duration(seconds: 2));
-      tasks.removeAt(index);
-      await _saveTasks(tasks);
+      await Future.delayed(const Duration(seconds: 3));
+      // Re-fetch tasks and remove by taskId (not index, as tasks may have changed)
+      final updatedTasks = await getAllTasks();
+      updatedTasks.removeWhere((task) => task.id == taskId);
+      await _saveTasks(updatedTasks);
+      print('Removed completed task: $completedFileName');
       await _broadcastProgress();
     }
   }

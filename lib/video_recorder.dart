@@ -21,7 +21,7 @@ class VideoRecorder extends StatefulWidget {
   _VideoRecorderState createState() => _VideoRecorderState();
 }
 
-class _VideoRecorderState extends State<VideoRecorder> {
+class _VideoRecorderState extends State<VideoRecorder> with WidgetsBindingObserver {
   CameraController? _controller;
   late Future<void> _initializeControllerFuture;
   bool _isRecording = false;
@@ -30,6 +30,7 @@ class _VideoRecorderState extends State<VideoRecorder> {
   
   // Timer for polling upload progress (needed because WorkManager runs in separate isolate)
   Timer? _uploadProgressTimer;
+  bool _showUploadProgress = true; // Default to true, will be overridden by settings
 
   // Global key for showing snackbars from background tasks
   final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
@@ -37,9 +38,20 @@ class _VideoRecorderState extends State<VideoRecorder> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initializeControllerFuture = _loadResolution();
     _loadExistingUploadTasks();
     _startUploadProgressPolling();
+    _loadShowUploadProgressSetting();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      // Reload settings when returning from settings page
+      _loadShowUploadProgressSetting();
+    }
   }
 
   /// Loads existing upload tasks to display in progress bar
@@ -47,12 +59,31 @@ class _VideoRecorderState extends State<VideoRecorder> {
     // Refresh and broadcast existing tasks to the UI
     await UploadStateManager.refreshTasks();
   }
+
+  /// Loads the setting for whether to show upload progress
+  Future<void> _loadShowUploadProgressSetting() async {
+    final prefs = await SharedPreferences.getInstance();
+    final showProgress = prefs.getBool('show_upload_progress') ?? true; // Default to true for backward compatibility
+    setState(() {
+      _showUploadProgress = showProgress;
+    });
+  }
+
+  /// Gets the current show upload progress setting directly from SharedPreferences
+  Future<bool> _getShowUploadProgressSetting() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('show_upload_progress') ?? true;
+  }
   
   /// Starts polling for upload progress updates
   /// This is needed because WorkManager runs in a separate isolate
   /// and cannot share the StreamController with the UI
+  /// Polls to ensure all state changes are broadcast, including when tasks are removed
   void _startUploadProgressPolling() {
-    _uploadProgressTimer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
+    _uploadProgressTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
+      // Always poll to ensure UI gets notified of all state changes including removals
+      // Add a small delay to prevent dominating compute resources
+      await Future.delayed(const Duration(milliseconds: 100));
       // Refresh tasks from SharedPreferences and broadcast to UI
       await UploadStateManager.refreshTasks();
     });
@@ -219,6 +250,7 @@ class _VideoRecorderState extends State<VideoRecorder> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _uploadProgressTimer?.cancel();
     _controller?.dispose();
     super.dispose();
@@ -464,106 +496,115 @@ class _VideoRecorderState extends State<VideoRecorder> {
           mainAxisSize: MainAxisSize.min,
           children: [
             // Upload Progress Bar
-            StreamBuilder<List<UploadTask>>(
-              stream: UploadStateManager.progressStream,
-              builder: (context, snapshot) {
-                print('[VideoRecorder.StreamBuilder] Received snapshot: hasData=${snapshot.hasData}, connectionState=${snapshot.connectionState}');
-                final tasks = snapshot.data ?? [];
-                print('[VideoRecorder.StreamBuilder] Total tasks: ${tasks.length}');
-                for (final t in tasks) {
-                  print('[VideoRecorder.StreamBuilder] Task: ${t.fileName}, status=${t.status}, uploaded=${t.uploadedBytes}/${t.totalBytes}');
-                }
-                final uploadingTasks = tasks.where((t) => 
-                  t.status == 'uploading' || t.status == 'pending' || t.status == 'completed'
-                ).toList();
-                print('[VideoRecorder.StreamBuilder] Visible tasks: ${uploadingTasks.length}');
-                
-                if (uploadingTasks.isEmpty) {
-                  return const SizedBox.shrink();
-                }
-                
-                return Container(
-                  color: Colors.black87,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: uploadingTasks.map((task) {
-                      final progress = (task.totalBytes != null && task.totalBytes! > 0)
-                          ? (task.uploadedBytes ?? 0) / task.totalBytes!
-                          : 0.0;
-                      final percentText = (progress * 100).toStringAsFixed(1);
-                      
-                      // Determine status color and icon
-                      Color statusColor;
-                      IconData statusIcon;
-                      String statusText;
-                      
-                      switch (task.status) {
-                        case 'completed':
-                          statusColor = Colors.green;
-                          statusIcon = Icons.check_circle;
-                          statusText = 'Completed';
-                          break;
-                        case 'failed':
-                          statusColor = Colors.red;
-                          statusIcon = Icons.error;
-                          statusText = 'Failed';
-                          break;
-                        case 'uploading':
-                          statusColor = Colors.blue;
-                          statusIcon = Icons.cloud_upload;
-                          statusText = 'Uploading $percentText%';
-                          break;
-                        default: // pending
-                          statusColor = Colors.orange;
-                          statusIcon = Icons.hourglass_empty;
-                          statusText = 'Pending...';
-                      }
-                      
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
+            FutureBuilder<bool>(
+              future: _getShowUploadProgressSetting(),
+              builder: (context, settingSnapshot) {
+                return StreamBuilder<List<UploadTask>>(
+                  stream: UploadStateManager.progressStream,
+                  builder: (context, snapshot) {
+                    // Always read current setting to ensure we have the latest value
+                    final showProgress = settingSnapshot.data ?? true;
+                    
+                    print('[VideoRecorder.StreamBuilder] Received snapshot: hasData=${snapshot.hasData}, connectionState=${snapshot.connectionState}, showProgress=$showProgress');
+                    final tasks = snapshot.data ?? [];
+                    print('[VideoRecorder.StreamBuilder] Total tasks: ${tasks.length}');
+                    for (final t in tasks) {
+                      print('[VideoRecorder.StreamBuilder] Task: ${t.fileName}, status=${t.status}, uploaded=${t.uploadedBytes}/${t.totalBytes}');
+                    }
+                    final uploadingTasks = tasks.where((t) => 
+                      t.status == 'uploading' || t.status == 'pending' || t.status == 'completed'
+                    ).toList();
+                    print('[VideoRecorder.StreamBuilder] Visible tasks: ${uploadingTasks.length}');
+                    
+                    // Don't show if setting is disabled or no tasks
+                    if (!showProgress || uploadingTasks.isEmpty) {
+                      return const SizedBox.shrink();
+                    }
+                    
+                    return Container(
+                      color: Colors.black87,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: uploadingTasks.map((task) {
+                          final progress = (task.totalBytes != null && task.totalBytes! > 0)
+                              ? (task.uploadedBytes ?? 0) / task.totalBytes!
+                              : 0.0;
+                          final percentText = (progress * 100).toStringAsFixed(1);
+                          
+                          // Determine status color and icon
+                          Color statusColor;
+                          IconData statusIcon;
+                          String statusText;
+                          
+                          switch (task.status) {
+                            case 'completed':
+                              statusColor = Colors.green;
+                              statusIcon = Icons.check_circle;
+                              statusText = 'Completed';
+                              break;
+                            case 'failed':
+                              statusColor = Colors.red;
+                              statusIcon = Icons.error;
+                              statusText = 'Failed';
+                              break;
+                            case 'uploading':
+                              statusColor = Colors.blue;
+                              statusIcon = Icons.cloud_upload;
+                              statusText = 'Uploading $percentText%';
+                              break;
+                            default: // pending
+                              statusColor = Colors.orange;
+                              statusIcon = Icons.hourglass_empty;
+                              statusText = 'Pending...';
+                          }
+                          
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Icon(statusIcon, color: statusColor, size: 16),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    task.fileName,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 12,
+                                Row(
+                                  children: [
+                                    Icon(statusIcon, color: statusColor, size: 16),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        task.fileName,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
                                     ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
+                                    Text(
+                                      statusText,
+                                      style: TextStyle(
+                                        color: statusColor,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                Text(
-                                  statusText,
-                                  style: TextStyle(
-                                    color: statusColor,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
+                                const SizedBox(height: 4),
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: LinearProgressIndicator(
+                                    value: task.status == 'completed' ? 1.0 : progress,
+                                    backgroundColor: Colors.grey[700],
+                                    valueColor: AlwaysStoppedAnimation<Color>(statusColor),
+                                    minHeight: 6,
                                   ),
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 4),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(4),
-                              child: LinearProgressIndicator(
-                                value: task.status == 'completed' ? 1.0 : progress,
-                                backgroundColor: Colors.grey[700],
-                                valueColor: AlwaysStoppedAnimation<Color>(statusColor),
-                                minHeight: 6,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    }).toList(),
-                  ),
+                          );
+                        }).toList(),
+                      ),
+                    );
+                  },
                 );
               },
             ),

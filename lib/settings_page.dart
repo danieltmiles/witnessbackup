@@ -26,6 +26,7 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _isWebDAVAuthenticated = false;
   bool _isDropboxAuthenticated = false;
   bool _backgroundRecordingEnabled = false;
+  bool _showUploadProgress = false; // Default to false as requested
 
   // WebDAV configuration controllers
   final TextEditingController _webdavUriController = TextEditingController();
@@ -39,6 +40,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _selectedResolution = widget.currentResolution;
     _loadCloudStorage();
     _loadBackgroundRecordingSetting();
+    _loadShowUploadProgressSetting();
   }
 
   @override
@@ -54,6 +56,14 @@ class _SettingsPageState extends State<SettingsPage> {
     final enabled = prefs.getBool('background_recording_enabled') ?? false;
     setState(() {
       _backgroundRecordingEnabled = enabled;
+    });
+  }
+
+  Future<void> _loadShowUploadProgressSetting() async {
+    final prefs = await SharedPreferences.getInstance();
+    final showProgress = prefs.getBool('show_upload_progress') ?? false; // Default to false as requested
+    setState(() {
+      _showUploadProgress = showProgress;
     });
   }
 
@@ -181,6 +191,23 @@ class _SettingsPageState extends State<SettingsPage> {
               fontWeight: FontWeight.bold,
             ),
           ),
+          const SizedBox(height: 16),
+          Card(
+            child: SwitchListTile(
+              title: const Text('Show Upload Progress'),
+              subtitle: const Text('Display upload progress bar in the main screen'),
+              value: _showUploadProgress,
+              onChanged: (bool value) async {
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setBool('show_upload_progress', value);
+                setState(() {
+                  _showUploadProgress = value;
+                });
+              },
+              secondary: const Icon(Icons.upload_file),
+            ),
+          ),
+          const SizedBox(height: 16),
           const SizedBox(height: 16),
           DropdownButtonFormField<String>(
             value: _selectedCloudStorage,
