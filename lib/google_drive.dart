@@ -49,7 +49,7 @@ class GoogleDriveAuth {
   // Secure storage instance
   static const _storage = FlutterSecureStorage();
 
-  // GoogleSignIn singleton instance
+  // GoogleSignIn singleton instance (v7.x uses GoogleSignIn.instance)
   static final GoogleSignIn _googleSignIn = GoogleSignIn.instance;
   
   // Storage keys
@@ -63,12 +63,17 @@ class GoogleDriveAuth {
     'https://www.googleapis.com/auth/drive.file',
   ];
   
-  /// Ensures GoogleSignIn is initialized
+  /// Ensures GoogleSignIn is initialized with proper credentials for Android/iOS
   static Future<void> _ensureInitialized() async {
     if (!_isInitialized) {
-      await _googleSignIn.initialize();
+      // TODO: Replace with your actual Web OAuth 2.0 Client ID from Google Cloud Console
+      const String serverClientId = '819796169860-so40h5468u4pda18s7lj70r90dlfjkc1.apps.googleusercontent.com'; // Android - REQUIRED: Web OAuth 2.0 Client ID
+      
+      await _googleSignIn.initialize(
+        serverClientId: serverClientId.isNotEmpty ? serverClientId : null,
+      );
       _isInitialized = true;
-      print('GoogleSignIn initialized');
+      print('GoogleSignIn initialized with serverClientId set: ${serverClientId.isNotEmpty}');
     }
   }
   
